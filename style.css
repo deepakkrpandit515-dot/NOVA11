@@ -107,3 +107,28 @@ h1,h2,h3{ text-shadow:0 0 18px rgba(93,225,245,.13) }
   .hero{transform:none}
   .avatar-area{transform:scale(.94);transform-origin:center}
 }
+
+/* NOVA 3D hologram upgrade: layered hair, facial depth, glass highlights and chest core */
+.avatar{transform-style:preserve-3d;perspective:650px;filter:drop-shadow(0 0 20px #62eafa99);animation:float3dHuman 5s ease-in-out infinite}
+.avatar:before{content:"";position:absolute;z-index:1;top:0;left:17px;width:94px;height:112px;border-radius:48% 48% 34% 34%;background:linear-gradient(105deg,#09142b 0%,#263d69 28%,#7189b8 48%,#17274a 73%,#080f24 100%);clip-path:polygon(18% 0,82% 0,100% 28%,91% 100%,78% 83%,73% 42%,28% 42%,22% 83%,8% 100%,0 28%);box-shadow:inset 8px 0 14px #9bdfff55, inset -9px 0 16px #0009}
+.avatar:after{content:"";position:absolute;z-index:5;bottom:4px;left:40px;width:48px;height:34px;border-radius:50% 50% 12px 12px;background:radial-gradient(ellipse at 50% 35%,#d9ffff 0 3%,#45d9f4 9%,#1c638f 32%,#112648 68%);box-shadow:0 0 22px #4deaffaa,inset 0 0 9px #e9ffff99;transform:translateZ(16px)}
+.face{z-index:3;transform:translateZ(18px);background:radial-gradient(ellipse at 34% 24%,#f3ffff 0%,#b8e6f1 27%,#739ebc 62%,#253d67 100%);box-shadow:inset 7px 4px 12px #fff9,inset -12px -8px 18px #10234799,0 5px 18px #4adcf477}
+.face:before{height:48px;background:linear-gradient(110deg,#080f24 0%,#1a2b50 27%,#738ab4 49%,#182b50 72%,#080f24 100%);box-shadow:inset 0 5px 9px #b3d8ff55,0 3px 9px #0009}
+.eye{height:5px;width:12px;background:linear-gradient(#06182d,#087b9b);box-shadow:0 0 3px #d9ffff,0 0 9px #00eaff;transform:translateZ(5px)}
+.nose{background:linear-gradient(90deg,#47728d,#d4faff,#527895);box-shadow:0 0 4px #b7f9ff}
+.mouth{border-bottom:2px solid #9c527f;filter:drop-shadow(0 0 3px #ffb6e6)}
+.shoulders{z-index:2;transform:translateZ(10px);background:linear-gradient(105deg,#081a39 0%,#24527c 22%,#78e7ed 49%,#2b5485 70%,#0b1936 100%);box-shadow:inset 0 5px 12px #d7ffff77,inset 0 -13px 18px #07132b,0 0 18px #53e8f477}
+.halo{transform-style:preserve-3d;backface-visibility:visible}
+.orbit{box-shadow:0 0 12px #80edff44,inset 0 0 8px #80edff22}
+@keyframes float3dHuman{0%,100%{transform:translate3d(0,0,12px) rotateY(-7deg) rotateX(2deg)}50%{transform:translate3d(0,-10px,24px) rotateY(7deg) rotateX(-2deg)}}
+@media(prefers-reduced-motion:reduce){.avatar{animation:none}}
+
+
+/* True WebGL 3D hologram canvas (Three.js) */
+.nova-3d-area{min-height:340px;display:grid;place-items:center;position:relative;overflow:hidden}
+.nova-3d-shell{width:min(100%,430px);height:360px;position:relative;display:grid;place-items:center;isolation:isolate}
+#nova3d{position:absolute;inset:0;width:100%;height:100%;z-index:2;touch-action:pan-y;cursor:grab;outline:none}
+#nova3d:active{cursor:grabbing}
+.nova-3d-shell .halo,.nova-3d-shell .orbit{pointer-events:none;z-index:1}
+.nova-3d-shell .avatar-caption{z-index:4;bottom:12px}
+.drag-hint{position:absolute;z-index:4;bottom:38px;font-size:9px;letter-spacing:2px;color:#8eeeff;opacity:.7}

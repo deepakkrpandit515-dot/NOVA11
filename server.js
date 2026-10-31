@@ -24,7 +24,7 @@ app.get("/api/health", (_req, res) => {
     backend: "online",
     aiConfigured: Boolean(OPENAI_API_KEY),
     model: OPENAI_API_KEY ? OPENAI_MODEL : null,
-    version: "NOVA 9"
+    version: "NOVA V7"
   });
 });
 
@@ -93,6 +93,6 @@ app.get("*", (_req, res) => {
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`NOVA 9 listening on port ${PORT}`);
+  console.log(`NOVA V7 listening on port ${PORT}`);
   console.log(`AI key configured: ${Boolean(OPENAI_API_KEY)}`);
 });

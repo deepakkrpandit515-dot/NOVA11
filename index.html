@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#070b18">
-  <meta name="description" content="NOVA 9 Personal AI Assistant">
+  <meta name="description" content="NOVA V7 Personal AI Assistant">
   <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/style.css">
-  <title>NOVA 9 • Personal AI</title>
+  <title>NOVA V7 • Personal AI</title>
 </head>
 <body>
 <div class="app">
   <header class="topbar">
-    <div class="brand"><div class="logo">N</div><div><b>NOVA 9</b><small>PERSONAL AI • GLOBAL INTELLIGENCE</small></div></div>
+    <div class="brand"><div class="logo">N</div><div><b>NOVA V7</b><small>PERSONAL AI • GLOBAL INTELLIGENCE</small></div></div>
     <div class="status"><i id="statusDot"></i><span id="statusText">Checking</span></div>
   </header>
 
@@ -20,19 +20,21 @@
     <section class="hero panel" id="home">
       <div class="hero-text">
         <div class="eyebrow">HUMAN-CONTROLLED AI SYSTEM</div>
-        <h1>Welcome to<br><span>NOVA 9</span></h1>
+        <h1>Welcome to<br><span>NOVA V7</span></h1>
         <p>Namaste! Main aapki AI assistant hoon. Text ya voice se baat shuru karein.</p>
         <div class="actions">
           <button class="btn primary" id="voiceStart">🎙 START VOICE</button>
           <button class="btn stop" id="voiceStop">■ RUKO</button>
+          <button class="btn secondary" id="installApp" hidden>＋ INSTALL APP</button>
         </div>
       </div>
-      <div class="avatar-area" aria-label="Animated holographic NOVA avatar">
-        <div class="holo">
+      <div class="avatar-area nova-3d-area" aria-label="Interactive real-time 3D NOVA hologram">
+        <div class="holo nova-3d-shell">
+          <canvas id="nova3d" aria-label="Interactive 3D NOVA avatar"></canvas>
           <div class="halo h1"></div><div class="halo h2"></div>
-          <div class="avatar"><div class="face"><span class="eye left"></span><span class="eye right"></span><span class="nose"></span><span class="mouth"></span></div><div class="neck"></div><div class="shoulders"></div></div>
           <div class="orbit orbit1"></div><div class="orbit orbit2"></div>
-          <div class="avatar-caption" id="avatarState">NOVA READY</div>
+          <div class="avatar-caption" id="avatarState">NOVA 3D • READY</div>
+          <small class="drag-hint">DRAG TO ROTATE</small>
         </div>
       </div>
     </section>
@@ -65,7 +67,7 @@
 
     <section class="page panel" id="business">
       <div class="section-head"><div><div class="eyebrow">IDEA WORKSPACE</div><h2>Business Center</h2></div><span class="pill">PLANNING</span></div>
-      <article class="tile"><h3>Business Notes</h3><p>Idea, customer problem, solution aur estimated costs note karein.</p><textarea id="businessNotes" rows="4" placeholder="Apna business idea likhein..."></textarea><button class="btn secondary" id="saveBusiness">SAVE NOTES</button></article>
+      <article class="tile"><h3>Business Notes</h3><p>Idea, customer problem, solution aur estimated costs note karein.</p><textarea id="businessNotes" rows="4" placeholder="Apna business idea likhein..."></textarea><div class="actions"><button class="btn secondary" id="saveBusiness">SAVE NOTES</button><button class="btn primary" id="scanIdeas">SCAN IDEAS</button></div><pre id="ideaResult" class="hint" aria-live="polite">Tap SCAN IDEAS to generate a low-cost idea to validate.</pre><p class="hint">Idea suggestions are planning prompts, not verified market demand or guaranteed income.</p></article>
     </section>
 
 
@@ -125,22 +127,24 @@
       <div class="section-head"><div><div class="eyebrow">FINANCE TRACKER</div><h2>Money Dashboard</h2></div><span class="pill">MANUAL RECORDS</span></div>
       <div class="money-grid"><div class="metric"><small>Recorded Income</small><strong id="incomeTotal">₹0</strong></div><div class="metric"><small>Recorded Expenses</small><strong id="expenseTotal">₹0</strong></div><div class="metric"><small>Balance</small><strong id="balanceTotal">₹0</strong></div></div>
       <form id="moneyForm" class="inline-form"><input id="moneyAmount" type="number" min="1" step="1" placeholder="Amount ₹" required><select id="moneyType"><option value="income">Income</option><option value="expense">Expense</option></select><input id="moneyNote" placeholder="Note (optional)"><button class="btn primary">ADD</button></form>
-      <p class="hint">Yeh aapke manually entered records hain, bank account se live sync nahi.</p><div id="moneyRows" class="rows"></div>
+      <p class="hint">Yeh aapke manually entered records hain, bank account se live sync nahi.</p>
+      <article class="tile withdraw-tile"><div class="eyebrow">PAYOUT TRACKER</div><h3>Withdraw / Payout Request</h3><p>Available balance se demo withdrawal request record kar sakte ho. Isse bank ya UPI par paise transfer nahi honge.</p><form id="withdrawForm" class="inline-form"><input id="withdrawAmount" type="number" min="1" step="1" placeholder="Withdraw amount ₹" required><button class="btn primary" type="submit">REQUEST WITHDRAWAL</button></form><p class="hint" id="withdrawStatus" aria-live="polite">Real payout provider abhi connected nahi hai.</p><div id="withdrawRows" class="rows"></div></article>
+      <button class="btn secondary" id="exportMoney" type="button">EXPORT CSV</button><div id="moneyRows" class="rows"></div>
     </section>
 
     <section class="page panel" id="research">
       <div class="section-head"><div><div class="eyebrow">GLOBAL INTELLIGENCE</div><h2>Research Desk</h2></div><span class="pill">NO LIVE SEARCH CONNECTOR</span></div>
-      <article class="tile"><div class="tile-icon">🌍</div><h3>Research workspace</h3><p>Topic aur research questions note karein. Live web search tabhi hoga jab search provider/tool connect kiya jayega.</p><textarea id="researchNotes" rows="4" placeholder="Research topic / questions..."></textarea><button class="btn secondary" id="saveResearch">SAVE RESEARCH</button></article>
+      <article class="tile"><div class="tile-icon">🌍</div><h3>Web Search</h3><p>Search button tumhare browser mein live web results kholega. NOVA abhi results ko khud read ya summarize nahi karti.</p><form id="webSearchForm" class="inline-form"><input id="webSearchQuery" placeholder="Search the web..." required><button class="btn primary">SEARCH WEB</button></form><h3>Research workspace</h3><textarea id="researchNotes" rows="4" placeholder="Research topic / questions..."></textarea><button class="btn secondary" id="saveResearch">SAVE RESEARCH</button></article>
     </section>
 
     <section class="page panel" id="tasks">
       <div class="section-head"><div><div class="eyebrow">PERSONAL CONTROL</div><h2>Tasks & Reminders</h2></div><span class="pill">ON THIS DEVICE</span></div>
-      <form id="taskForm" class="inline-form"><input id="taskInput" placeholder="New task..." required><button class="btn primary">ADD TASK</button></form><div id="taskRows" class="rows"></div>
+      <form id="taskForm" class="inline-form"><input id="taskInput" placeholder="New task..." required><button class="btn primary">ADD TASK</button></form><p class="hint">Tasks are saved on this device. Keep NOVA open for browser reminders; background alerts are not guaranteed.</p><div id="taskRows" class="rows"></div>
     </section>
 
     <section class="page panel" id="files">
       <div class="section-head"><div><div class="eyebrow">DIGITAL STORAGE</div><h2>Files</h2></div><span class="pill">LOCAL DEVICE</span></div>
-      <article class="tile"><p>Choose a file to view its name. This page does not upload it to a server.</p><input id="filePicker" type="file"><p id="fileInfo" class="hint">No file selected.</p></article>
+      <article class="tile"><p>Files are saved in this browser on this device using IndexedDB. This is real local storage, not cloud upload. Do not store passwords, OTPs, bank details or sensitive documents here.</p><input id="filePicker" type="file" multiple><p id="fileInfo" class="hint">No files saved.</p><div id="fileRows" class="rows"></div></article>
     </section>
 
     <section class="page panel" id="memory">
@@ -155,10 +159,13 @@
       <p id="backendResult" class="hint">Backend URL enter karke Check Backend dabayein.</p>
       <div class="tile"><h3>AI Provider</h3><p>API key sirf hosting provider ke Environment Variables mein set karein. HTML ya GitHub mein secret key kabhi na daalein.</p><p><b>OPENAI_API_KEY</b> = Render Environment setting</p><p><b>OPENAI_MODEL</b> = gpt-5.6 (ya aapke account mein available model)</p></div>
       <div class="tile"><h3>System limitations</h3><p>Market prices, global search, cloud file storage, bank sync, background phone-off execution aur external actions abhi integrated nahi hain. Inke liye alag trusted providers, permissions aur setup chahiye.</p></div>
+      <div class="tile"><h3>Backup & Restore</h3><p>Tasks, notes, money records aur social drafts ka encrypted nahi, local JSON backup bana sakte hain. Backup file ko private rakhein.</p><div class="actions"><button class="btn primary" id="exportBackup" type="button">⬇ EXPORT NOVA BACKUP</button><label class="btn secondary" for="importBackup">IMPORT BACKUP</label><input id="importBackup" type="file" accept="application/json,.json" hidden></div><p class="hint" id="backupStatus" aria-live="polite">Backup isi device par manually save/restore hota hai.</p></div>
+      <div class="tile"><h3>Privacy & Local Data</h3><p>NOVA ke local notes aur records isi browser ke storage mein hain. Shared phone par private information save na karein.</p><button class="btn stop" id="clearLocalData" type="button">CLEAR NOVA LOCAL DATA</button></div>
     </section>
   </main>
-  <footer> N O V A 9 <span>• Owner-controlled intelligence</span></footer>
+  <footer> N O V A V7 <span>• Owner-controlled intelligence</span></footer>
 </div>
 <script src="/app.js"></script>
+<script type="module" src="/nova3d.js"></script>
 </body>
 </html>

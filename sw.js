@@ -1,15 +1,5 @@
-const CACHE = "nova9-shell-v1";
-const CORE = ["/", "/index.html", "/style.css", "/app.js", "/manifest.json"];
-self.addEventListener("install", event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(CORE)));
-  self.skipWaiting();
-});
-self.addEventListener("activate", event => {
-  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))));
-  self.clients.claim();
-});
-self.addEventListener("fetch", event => {
-  const url = new URL(event.request.url);
-  if (event.request.method !== "GET" || url.pathname.startsWith("/api/")) return;
-  event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request)));
-});
+const CACHE='nova-v7-3d-v2';
+const CORE=['/','/index.html','/style.css','/app.js','/nova3d.js','/manifest.json','/nova-icon.svg'];
+self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).then(()=>self.skipWaiting())));
+self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
+self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy));return r;}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/'))));});
