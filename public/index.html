@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#070b18">
+  <meta name="description" content="NOVA 9 Personal AI Assistant">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/style.css">
+  <title>NOVA 9 • Personal AI</title>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="logo">N</div><div><b>NOVA 9</b><small>PERSONAL AI • GLOBAL INTELLIGENCE</small></div></div>
+    <div class="status"><i id="statusDot"></i><span id="statusText">Checking</span></div>
+  </header>
+
+  <main>
+    <section class="hero panel" id="home">
+      <div class="hero-text">
+        <div class="eyebrow">HUMAN-CONTROLLED AI SYSTEM</div>
+        <h1>Welcome to<br><span>NOVA 9</span></h1>
+        <p>Namaste! Main aapki AI assistant hoon. Text ya voice se baat shuru karein.</p>
+        <div class="actions">
+          <button class="btn primary" id="voiceStart">🎙 START VOICE</button>
+          <button class="btn stop" id="voiceStop">■ RUKO</button>
+        </div>
+      </div>
+      <div class="avatar-area" aria-label="Animated holographic NOVA avatar">
+        <div class="holo">
+          <div class="halo h1"></div><div class="halo h2"></div>
+          <div class="avatar"><div class="face"><span class="eye left"></span><span class="eye right"></span><span class="nose"></span><span class="mouth"></span></div><div class="neck"></div><div class="shoulders"></div></div>
+          <div class="orbit orbit1"></div><div class="orbit orbit2"></div>
+          <div class="avatar-caption" id="avatarState">NOVA READY</div>
+        </div>
+      </div>
+    </section>
+
+    <nav class="nav" aria-label="NOVA modules">
+      <button class="nav-item active" data-page="chat">✧ AI Chat</button>
+      <button class="nav-item" data-page="market">◈ Market</button>
+      <button class="nav-item" data-page="business">▣ Business</button>
+      <button class="nav-item" data-page="social">◎ Social Media</button>
+      <button class="nav-item" data-page="studio">✦ Photo/Video Studio</button>
+      <button class="nav-item" data-page="money">₹ Money</button>
+      <button class="nav-item" data-page="research">⌕ Research</button>
+      <button class="nav-item" data-page="tasks">✓ Tasks</button>
+      <button class="nav-item" data-page="files">▤ Files</button>
+      <button class="nav-item" data-page="memory">◎ Memory</button>
+      <button class="nav-item" data-page="settings">⚙ Settings</button>
+    </nav>
+
+    <section class="page panel active" id="chat">
+      <div class="section-head"><div><div class="eyebrow">NOVA INTELLIGENCE</div><h2>AI Chat</h2></div><span class="pill">AI BACKEND</span></div>
+      <div class="chat-log" id="chatLog" aria-live="polite"><div class="bubble nova"><b>NOVA</b><p>Namaste! Backend aur AI key connect hone par main jawab de sakti hoon.</p></div></div>
+      <form id="chatForm" class="chat-form"><textarea id="message" rows="2" placeholder="NOVA se kuch poochhein..." required></textarea><button class="btn primary" type="submit">SEND ➤</button></form>
+      <p class="hint" id="chatHint">AI chat ke liye backend online aur API key configured honi chahiye.</p>
+    </section>
+
+    <section class="page panel" id="market">
+      <div class="section-head"><div><div class="eyebrow">MARKET INTELLIGENCE</div><h2>Market Center</h2></div><span class="pill">DATA CONNECTOR NEEDED</span></div>
+      <div class="cards"><article class="tile"><div class="tile-icon">📈</div><h3>Market Watch</h3><p>Live prices abhi connected nahi hain. Kisi market-data provider ko integrate karna hoga.</p></article><article class="tile"><div class="tile-icon">🌐</div><h3>Opportunity Scanner</h3><p>Ideas aur research ko verify karke yahan track karein. Results ya income guaranteed nahi hain.</p></article></div>
+    </section>
+
+    <section class="page panel" id="business">
+      <div class="section-head"><div><div class="eyebrow">IDEA WORKSPACE</div><h2>Business Center</h2></div><span class="pill">PLANNING</span></div>
+      <article class="tile"><h3>Business Notes</h3><p>Idea, customer problem, solution aur estimated costs note karein.</p><textarea id="businessNotes" rows="4" placeholder="Apna business idea likhein..."></textarea><button class="btn secondary" id="saveBusiness">SAVE NOTES</button></article>
+    </section>
+
+
+    <section class="page panel" id="social">
+      <div class="section-head"><div><div class="eyebrow">SOCIAL MEDIA WORKSPACE</div><h2>Social Media</h2></div><span class="pill">DRAFTS • APPROVAL FIRST</span></div>
+      <div class="cards">
+        <article class="tile">
+          <div class="tile-icon">✍️</div><h3>Post & Caption Studio</h3>
+          <label class="field">Platform
+            <select id="socialPlatform"><option>Instagram</option><option>YouTube</option><option>Facebook</option><option>WhatsApp</option><option>LinkedIn</option><option>X</option></select>
+          </label>
+          <label class="field">Post / caption draft<textarea id="socialDraft" rows="5" placeholder="Apna post, caption ya content idea likhein..."></textarea></label>
+          <label class="field">Hashtags (optional)<input id="socialTags" placeholder="#NOVA #Business"></label>
+          <button class="btn primary" id="saveSocialDraft">SAVE DRAFT</button>
+          <p class="hint">NOVA yahan content draft save karta hai. Publish ya post automatically nahi hota.</p>
+        </article>
+        <article class="tile">
+          <div class="tile-icon">💬</div><h3>Comments & Messages</h3>
+          <textarea id="socialReply" rows="5" placeholder="Comment ya message ka reply draft..."></textarea>
+          <button class="btn secondary" id="saveSocialReply">SAVE REPLY DRAFT</button>
+          <p class="hint">Passwords, OTP ya private login details yahan na daalein. Send karne se pehle khud review karein.</p>
+        </article>
+      </div>
+      <article class="tile">
+        <h3>Saved Social Drafts</h3><div id="socialRows" class="rows"></div>
+      </article>
+      <article class="tile">
+        <h3>Notification Summary</h3>
+        <p>Connected social accounts abhi available nahi hain. Notifications yahan tabhi dikhengi jab official account integration connect ki jayegi.</p>
+      </article>
+    </section>
+
+    <section class="page panel" id="studio">
+      <div class="section-head"><div><div class="eyebrow">CREATOR WORKSPACE</div><h2>Photo & Video Studio</h2></div><span class="pill">ON-DEVICE PREVIEW</span></div>
+      <div class="cards">
+        <article class="tile">
+          <div class="tile-icon">🖼️</div><h3>Photo Editor</h3>
+          <input id="photoPicker" type="file" accept="image/*">
+          <canvas id="photoCanvas" class="photo-canvas" aria-label="Photo preview"></canvas>
+          <label class="field">Brightness <input id="photoBrightness" type="range" min="50" max="150" value="100"></label>
+          <label class="field">Contrast <input id="photoContrast" type="range" min="50" max="150" value="100"></label>
+          <label class="field">Saturation <input id="photoSaturation" type="range" min="0" max="200" value="100"></label>
+          <div class="actions"><button class="btn secondary" id="resetPhoto" type="button">RESET</button><button class="btn primary" id="downloadPhoto" type="button">DOWNLOAD EDITED PHOTO</button></div>
+          <p class="hint">Basic editing runs locally in this browser. AI background removal and advanced retouching are not connected.</p>
+        </article>
+        <article class="tile">
+          <div class="tile-icon">🎬</div><h3>Video Preview</h3>
+          <input id="videoPicker" type="file" accept="video/*">
+          <video id="videoPreview" controls playsinline></video>
+          <button class="btn secondary" id="downloadVideo" type="button">DOWNLOAD ORIGINAL VIDEO</button>
+          <p class="hint">This version previews and saves the selected original video. Timeline editing, effects and rendered export are not connected yet.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="page panel" id="money">
+      <div class="section-head"><div><div class="eyebrow">FINANCE TRACKER</div><h2>Money Dashboard</h2></div><span class="pill">MANUAL RECORDS</span></div>
+      <div class="money-grid"><div class="metric"><small>Recorded Income</small><strong id="incomeTotal">₹0</strong></div><div class="metric"><small>Recorded Expenses</small><strong id="expenseTotal">₹0</strong></div><div class="metric"><small>Balance</small><strong id="balanceTotal">₹0</strong></div></div>
+      <form id="moneyForm" class="inline-form"><input id="moneyAmount" type="number" min="1" step="1" placeholder="Amount ₹" required><select id="moneyType"><option value="income">Income</option><option value="expense">Expense</option></select><input id="moneyNote" placeholder="Note (optional)"><button class="btn primary">ADD</button></form>
+      <p class="hint">Yeh aapke manually entered records hain, bank account se live sync nahi.</p><div id="moneyRows" class="rows"></div>
+    </section>
+
+    <section class="page panel" id="research">
+      <div class="section-head"><div><div class="eyebrow">GLOBAL INTELLIGENCE</div><h2>Research Desk</h2></div><span class="pill">NO LIVE SEARCH CONNECTOR</span></div>
+      <article class="tile"><div class="tile-icon">🌍</div><h3>Research workspace</h3><p>Topic aur research questions note karein. Live web search tabhi hoga jab search provider/tool connect kiya jayega.</p><textarea id="researchNotes" rows="4" placeholder="Research topic / questions..."></textarea><button class="btn secondary" id="saveResearch">SAVE RESEARCH</button></article>
+    </section>
+
+    <section class="page panel" id="tasks">
+      <div class="section-head"><div><div class="eyebrow">PERSONAL CONTROL</div><h2>Tasks & Reminders</h2></div><span class="pill">ON THIS DEVICE</span></div>
+      <form id="taskForm" class="inline-form"><input id="taskInput" placeholder="New task..." required><button class="btn primary">ADD TASK</button></form><div id="taskRows" class="rows"></div>
+    </section>
+
+    <section class="page panel" id="files">
+      <div class="section-head"><div><div class="eyebrow">DIGITAL STORAGE</div><h2>Files</h2></div><span class="pill">LOCAL DEVICE</span></div>
+      <article class="tile"><p>Choose a file to view its name. This page does not upload it to a server.</p><input id="filePicker" type="file"><p id="fileInfo" class="hint">No file selected.</p></article>
+    </section>
+
+    <section class="page panel" id="memory">
+      <div class="section-head"><div><div class="eyebrow">PERSONAL NOTES</div><h2>Memory</h2></div><span class="pill">LOCAL NOTES</span></div>
+      <article class="tile"><p>Yahan aapke likhe notes is browser mein save honge. Yeh automatic AI memory ya secure cloud storage nahi hai.</p><textarea id="memoryNotes" rows="5" placeholder="NOVA ke liye notes..."></textarea><button class="btn secondary" id="saveMemory">SAVE MEMORY NOTES</button></article>
+    </section>
+
+    <section class="page panel" id="settings">
+      <div class="section-head"><div><div class="eyebrow">SYSTEM CONTROL</div><h2>Settings</h2></div><span class="pill">CONFIGURATION</span></div>
+      <label class="field">Backend base URL<input id="backendUrl" type="url" placeholder="https://your-service.onrender.com"></label>
+      <div class="actions"><button class="btn primary" id="checkBackend">CHECK BACKEND</button><button class="btn secondary" id="saveSettings">SAVE SETTINGS</button></div>
+      <p id="backendResult" class="hint">Backend URL enter karke Check Backend dabayein.</p>
+      <div class="tile"><h3>AI Provider</h3><p>API key sirf hosting provider ke Environment Variables mein set karein. HTML ya GitHub mein secret key kabhi na daalein.</p><p><b>OPENAI_API_KEY</b> = Render Environment setting</p><p><b>OPENAI_MODEL</b> = gpt-5.6 (ya aapke account mein available model)</p></div>
+      <div class="tile"><h3>System limitations</h3><p>Market prices, global search, cloud file storage, bank sync, background phone-off execution aur external actions abhi integrated nahi hain. Inke liye alag trusted providers, permissions aur setup chahiye.</p></div>
+    </section>
+  </main>
+  <footer> N O V A 9 <span>• Owner-controlled intelligence</span></footer>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

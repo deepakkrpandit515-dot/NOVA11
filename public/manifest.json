@@ -1,0 +1,10 @@
+{
+  "name": "NOVA 9 Personal AI",
+  "short_name": "NOVA 9",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070b18",
+  "theme_color": "#070b18",
+  "description": "NOVA 9 personal AI assistant",
+  "icons": []
+}
