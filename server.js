@@ -1,98 +1,147 @@
+
 const express = require("express");
-const path = require("path");
 
 const app = express();
-const PORT = process.env.PORT || 10000;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.6";
+const PORT = process.env.PORT || 3000;
 
-// CORS for hosted frontends. No credentialed cross-origin requests are used.
+app.use(express.json({ limit: "1mb" }));
+
+// CORS
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
-app.use(express.json({ limit: "1mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+// NOVA system identity
+const SYSTEM_PROMPT = `
+You are NOVA, a personal AI assistant.
+You are helpful, intelligent and respectful.
+Reply in Hindi or Hinglish when the user uses Hindi.
+Help with learning, research, business ideas and daily tasks.
+Never claim an action was completed unless it really was.
+Ask permission before external actions.
+Do not guarantee income or profits.
+`;
 
-app.get("/api/health", (_req, res) => {
+// Health check
+app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     backend: "online",
-    aiConfigured: Boolean(OPENAI_API_KEY),
-    model: OPENAI_API_KEY ? OPENAI_MODEL : null,
-    version: "NOVA V7"
+    aiConfigured: !!process.env.GEMINI_API_KEY,
+    provider: "Google Gemini",
+    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    version: "NOVA V10"
   });
 });
 
+// NOVA AI Chat
 app.post("/api/chat", async (req, res) => {
   try {
-    const message = String(req.body?.message || "").trim().slice(0, 8000);
-    const history = Array.isArray(req.body?.history) ? req.body.history.slice(-12) : [];
-    if (!message) return res.status(400).json({ error: "Message is required." });
+    const apiKey = process.env.GEMINI_API_KEY;
 
-    if (!OPENAI_API_KEY) {
+    if (!apiKey) {
       return res.status(503).json({
-        error: "AI key is not configured on the backend.",
-        hint: "Add OPENAI_API_KEY in your hosting provider Environment settings."
+        ok: false,
+        error: "Gemini API key missing. Add GEMINI_API_KEY in Render."
       });
     }
 
-    const input = [];
-    for (const item of history) {
-      const role = item?.role === "assistant" ? "assistant" : "user";
-      const content = String(item?.content || "").slice(0, 4000);
-      if (content) input.push({ role, content });
-    }
-    input.push({ role: "user", content: message });
+    const message =
+      req.body.message ||
+      req.body.prompt ||
+      req.body.text;
 
-    const upstream = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        instructions: [
-          "You are NOVA 9, a helpful personal AI assistant.",
-          "Reply in Hindi or Hinglish when the user does.",
-          "Be practical and honest. Never claim to have searched live data or completed an external action unless a connected tool actually did it.",
-          "Ask for confirmation before consequential external actions.",
-          "For money and business topics, explain uncertainty and never guarantee earnings."
-        ].join(" "),
-        input
-      })
+    if (!message && !Array.isArray(req.body.messages)) {
+      return res.status(400).json({
+        ok: false,
+        error: "Message is required."
+      });
+    }
+
+    const history = Array.isArray(req.body.messages)
+      ? req.body.messages
+          .filter(m => m && (m.role === "user" || m.role === "assistant"))
+          .slice(-20)
+          .map(m => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: String(m.content || m.text || "") }]
+          }))
+          .filter(m => m.parts[0].text.trim())
+      : [
+          {
+            role: "user",
+            parts: [{ text: String(message) }]
+          }
+        ];
+
+    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: SYSTEM_PROMPT }]
+          },
+          contents: history,
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 2048
+          }
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Gemini API error:", data);
+
+      return res.status(response.status).json({
+        ok: false,
+        error: data.error?.message || "Gemini API request failed."
+      });
+    }
+
+    const reply = (data.candidates?.[0]?.content?.parts || [])
+      .map(part => part.text || "")
+      .join("")
+      .trim();
+
+    if (!reply) {
+      return res.status(502).json({
+        ok: false,
+        error: "NOVA received an empty AI response."
+      });
+    }
+
+    res.json({
+      ok: true,
+      reply,
+      text: reply,
+      provider: "Google Gemini",
+      model
     });
 
-    const data = await upstream.json().catch(() => ({}));
-    if (!upstream.ok) {
-      const detail = data?.error?.message || `AI provider request failed (${upstream.status}).`;
-      return res.status(upstream.status).json({ error: detail });
-    }
-
-    let reply = data.output_text || "";
-    if (!reply && Array.isArray(data.output)) {
-      reply = data.output.flatMap(item => item.content || [])
-        .filter(item => item.type === "output_text")
-        .map(item => item.text)
-        .join("\\n");
-    }
-    return res.json({ ok: true, reply: reply || "No text was returned.", model: OPENAI_MODEL });
   } catch (error) {
-    console.error("NOVA 9 chat error:", error);
-    return res.status(500).json({ error: "Backend error. Check server logs." });
+    console.error("NOVA error:", error);
+
+    res.status(500).json({
+      ok: false,
+      error: "NOVA server error: " + error.message
+    });
   }
 });
 
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
+// Server
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`NOVA V7 listening on port ${PORT}`);
-  console.log(`AI key configured: ${Boolean(OPENAI_API_KEY)}`);
+  console.log(`NOVA V10 running on port ${PORT}`);
 });
