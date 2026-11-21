@@ -1,147 +1,343 @@
 
-const express = require("express");
+'use strict';
+
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 10000;
 
-app.use(express.json({ limit: "1mb" }));
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 
-// CORS
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+
+const PRIMARY_PROVIDER =
+  (process.env.NOVA_PRIMARY_PROVIDER || 'gemini').toLowerCase();
+
+const SYSTEM_PROMPT = [
+  'You are NOVA, a helpful personal AI assistant.',
+  'Reply clearly and practically. Use Hindi or Hinglish when the user does.',
+  'Never claim actions you did not perform.',
+  'Ask permission before consequential external actions.',
+  'Never promise financial earnings.'
+].join(' ');
+
+const publicDir = path.join(__dirname, 'public');
+
+const frontendDir = fs.existsSync(
+  path.join(publicDir, 'index.html')
+) ? publicDir : __dirname;
+
+app.disable('x-powered-by');
+
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  if (req.method === "OPTIONS") return res.sendStatus(204);
+  const allowedOrigin =
+    process.env.NOVA_ALLOWED_ORIGIN || '*';
+
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization'
+  );
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
   next();
 });
 
-// NOVA system identity
-const SYSTEM_PROMPT = `
-You are NOVA, a personal AI assistant.
-You are helpful, intelligent and respectful.
-Reply in Hindi or Hinglish when the user uses Hindi.
-Help with learning, research, business ideas and daily tasks.
-Never claim an action was completed unless it really was.
-Ask permission before external actions.
-Do not guarantee income or profits.
-`;
+app.use(express.json({ limit: '1mb' }));
+app.use(express.static(frontendDir));
 
-// Health check
-app.get("/api/health", (req, res) => {
+function makeMessages(history, message) {
+  const messages = [];
+
+  for (const item of history) {
+    if (!item || typeof item !== 'object') continue;
+
+    const role =
+      item.role === 'assistant' ? 'assistant' : 'user';
+
+    const content =
+      String(item.content || '').slice(0, 4000);
+
+    if (content) {
+      messages.push({ role, content });
+    }
+  }
+
+  messages.push({
+    role: 'user',
+    content: message
+  });
+
+  return messages;
+}
+
+// GOOGLE GEMINI AI
+async function askGemini(messages) {
+
+  const contents = messages.map(item => ({
+    role: item.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: item.content }]
+  }));
+
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+
+    headers: {
+      'Content-Type': 'application/json'
+    },
+
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: SYSTEM_PROMPT }]
+      },
+
+      contents,
+
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 2048
+      }
+    }),
+
+    signal: AbortSignal.timeout(45000)
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message ||
+      `Gemini request failed (${response.status})`
+    );
+  }
+
+  const answer =
+    (data?.candidates?.[0]?.content?.parts || [])
+      .map(part => part.text || '')
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+
+  if (!answer) {
+    throw new Error('Gemini returned no text.');
+  }
+
+  return {
+    reply: answer,
+    provider: 'Google Gemini',
+    model: GEMINI_MODEL
+  };
+}
+
+// GROQ AI
+async function askGroq(messages) {
+
+  const response = await fetch(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      method: 'POST',
+
+      headers: {
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+
+        messages: [
+          {
+            role: 'system',
+            content: SYSTEM_PROMPT
+          },
+          ...messages
+        ],
+
+        temperature: 0.7,
+        max_tokens: 2048
+      }),
+
+      signal: AbortSignal.timeout(45000)
+    }
+  );
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message ||
+      `Groq request failed (${response.status})`
+    );
+  }
+
+  const answer =
+    data?.choices?.[0]?.message?.content?.trim();
+
+  if (!answer) {
+    throw new Error('Groq returned no text.');
+  }
+
+  return {
+    reply: answer,
+    provider: 'Groq',
+    model: GROQ_MODEL
+  };
+}
+
+// BACKEND HEALTH CHECK
+app.get('/api/health', (_req, res) => {
+
+  const available = [];
+
+  if (GEMINI_API_KEY) {
+    available.push('Google Gemini');
+  }
+
+  if (GROQ_API_KEY) {
+    available.push('Groq');
+  }
+
   res.json({
     ok: true,
-    backend: "online",
-    aiConfigured: !!process.env.GEMINI_API_KEY,
-    provider: "Google Gemini",
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-    version: "NOVA V10"
+    backend: 'online',
+
+    aiConfigured: available.length > 0,
+
+    provider: available.length
+      ? available.join(' + ')
+      : null,
+
+    primaryProvider: PRIMARY_PROVIDER,
+
+    model: GEMINI_API_KEY
+      ? GEMINI_MODEL
+      : (GROQ_API_KEY ? GROQ_MODEL : null),
+
+    availableProviders: available,
+
+    version: 'NOVA V10.1'
   });
 });
 
-// NOVA AI Chat
-app.post("/api/chat", async (req, res) => {
-  try {
-    const apiKey = process.env.GEMINI_API_KEY;
+// NOVA AI CHAT
+app.post('/api/chat', async (req, res) => {
 
-    if (!apiKey) {
-      return res.status(503).json({
-        ok: false,
-        error: "Gemini API key missing. Add GEMINI_API_KEY in Render."
-      });
-    }
+  const message =
+    String(req.body?.message || '').trim();
 
-    const message =
-      req.body.message ||
-      req.body.prompt ||
-      req.body.text;
+  const history =
+    Array.isArray(req.body?.history)
+      ? req.body.history.slice(-12)
+      : [];
 
-    if (!message && !Array.isArray(req.body.messages)) {
-      return res.status(400).json({
-        ok: false,
-        error: "Message is required."
-      });
-    }
-
-    const history = Array.isArray(req.body.messages)
-      ? req.body.messages
-          .filter(m => m && (m.role === "user" || m.role === "assistant"))
-          .slice(-20)
-          .map(m => ({
-            role: m.role === "assistant" ? "model" : "user",
-            parts: [{ text: String(m.content || m.text || "") }]
-          }))
-          .filter(m => m.parts[0].text.trim())
-      : [
-          {
-            role: "user",
-            parts: [{ text: String(message) }]
-          }
-        ];
-
-    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: SYSTEM_PROMPT }]
-          },
-          contents: history,
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 2048
-          }
-        })
-      }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error("Gemini API error:", data);
-
-      return res.status(response.status).json({
-        ok: false,
-        error: data.error?.message || "Gemini API request failed."
-      });
-    }
-
-    const reply = (data.candidates?.[0]?.content?.parts || [])
-      .map(part => part.text || "")
-      .join("")
-      .trim();
-
-    if (!reply) {
-      return res.status(502).json({
-        ok: false,
-        error: "NOVA received an empty AI response."
-      });
-    }
-
-    res.json({
-      ok: true,
-      reply,
-      text: reply,
-      provider: "Google Gemini",
-      model
-    });
-
-  } catch (error) {
-    console.error("NOVA error:", error);
-
-    res.status(500).json({
+  if (!message) {
+    return res.status(400).json({
       ok: false,
-      error: "NOVA server error: " + error.message
+      error: 'Message is required.'
     });
   }
+
+  if (message.length > 10000) {
+    return res.status(413).json({
+      ok: false,
+      error: 'Message is too long.'
+    });
+  }
+
+  if (!GEMINI_API_KEY && !GROQ_API_KEY) {
+    return res.status(503).json({
+      ok: false,
+      error: 'Add GEMINI_API_KEY and/or GROQ_API_KEY in Render Environment.'
+    });
+  }
+
+  const messages = makeMessages(history, message);
+
+  // AUTOMATIC PROVIDER FALLBACK
+  const providers = PRIMARY_PROVIDER === 'groq'
+    ? [
+        GROQ_API_KEY ? ['Groq', askGroq] : null,
+        GEMINI_API_KEY ? ['Google Gemini', askGemini] : null
+      ].filter(Boolean)
+
+    : [
+        GEMINI_API_KEY ? ['Google Gemini', askGemini] : null,
+        GROQ_API_KEY ? ['Groq', askGroq] : null
+      ].filter(Boolean);
+
+  const errors = [];
+
+  for (const [name, callProvider] of providers) {
+
+    try {
+
+      const result = await callProvider(messages);
+
+      return res.json({
+        ok: true,
+        ...result,
+        fallbackUsed: errors.length > 0
+      });
+
+    } catch (err) {
+
+      console.error(
+        `${name} provider error:`,
+        err.message
+      );
+
+      errors.push(`${name}: ${err.message}`);
+    }
+  }
+
+  return res.status(502).json({
+    ok: false,
+
+    error:
+      'All configured AI providers failed. Check API keys and provider limits.',
+
+    details: errors
+  });
 });
 
-// Server
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`NOVA V10 running on port ${PORT}`);
+// HOME PAGE
+app.get('/', (_req, res) => {
+
+  const indexFile =
+    path.join(frontendDir, 'index.html');
+
+  if (!fs.existsSync(indexFile)) {
+    return res.status(404).send(
+      'NOVA frontend not found. Put index.html inside public folder.'
+    );
+  }
+
+  return res.sendFile(indexFile);
+});
+
+// START SERVER
+app.listen(PORT, '0.0.0.0', () => {
+
+  console.log(`NOVA V10.1 listening on port ${PORT}`);
+
+  console.log(`Frontend directory: ${frontendDir}`);
+
+  console.log(
+    `Gemini configured: ${Boolean(GEMINI_API_KEY)}`
+  );
+
+  console.log(
+    `Groq configured: ${Boolean(GROQ_API_KEY)}`
+  );
 });
