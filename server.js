@@ -8,22 +8,42 @@ const fs = require('fs');
 const app = express();
 const PORT = Number(process.env.PORT) || 10000;
 
+// =====================================
+// NOVA V11 - AI CONFIGURATION
+// =====================================
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const GEMINI_MODEL =
+  process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+
+const GROQ_MODEL =
+  process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 
 const PRIMARY_PROVIDER =
   (process.env.NOVA_PRIMARY_PROVIDER || 'gemini').toLowerCase();
 
-const SYSTEM_PROMPT = [
-  'You are NOVA, a helpful personal AI assistant.',
-  'Reply clearly and practically. Use Hindi or Hinglish when the user does.',
-  'Never claim actions you did not perform.',
-  'Ask permission before consequential external actions.',
-  'Never promise financial earnings.'
-].join(' ');
+const TIMEOUT = 45000;
+
+const SYSTEM_PROMPT = `
+You are NOVA, a helpful personal AI assistant.
+
+Your responsibilities:
+- Help the user with daily tasks and questions.
+- Understand Hindi, English and Hinglish.
+- Reply in the language used by the user.
+- Give clear, practical and accurate answers.
+- Help with technology, business, learning and research.
+- Never pretend that an action was completed if it was not.
+- Ask permission before consequential external actions.
+- Never promise guaranteed financial earnings.
+- Keep answers friendly and useful.
+`;
+
+// =====================================
+// FRONTEND
+// =====================================
 
 const publicDir = path.join(__dirname, 'public');
 
@@ -34,11 +54,13 @@ const frontendDir = fs.existsSync(
 app.disable('x-powered-by');
 
 app.use((req, res, next) => {
-  const allowedOrigin =
-    process.env.NOVA_ALLOWED_ORIGIN || '*';
+  const origin = process.env.NOVA_ALLOWED_ORIGIN || '*';
 
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader(
+    'Access-Control-Allow-Methods',
+    'GET, POST, OPTIONS'
+  );
   res.setHeader(
     'Access-Control-Allow-Headers',
     'Content-Type, Authorization'
@@ -54,33 +76,106 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(frontendDir));
 
+// =====================================
+// MESSAGE VALIDATION
+// =====================================
+
 function makeMessages(history, message) {
   const messages = [];
 
-  for (const item of history) {
+  const items = Array.isArray(history)
+    ? history.slice(-12)
+    : [];
+
+  for (const item of items) {
     if (!item || typeof item !== 'object') continue;
 
-    const role =
-      item.role === 'assistant' ? 'assistant' : 'user';
+    const role = item.role === 'assistant'
+      ? 'assistant'
+      : item.role === 'user'
+        ? 'user'
+        : null;
 
-    const content =
-      String(item.content || '').slice(0, 4000);
+    if (!role) continue;
 
-    if (content) {
+    const content = String(item.content || '')
+      .trim()
+      .slice(0, 4000);
+
+    if (!content) continue;
+
+    const previous = messages[messages.length - 1];
+
+    // Merge consecutive messages of the same role.
+    if (previous && previous.role === role) {
+      previous.content += '\n' + content;
+    } else {
       messages.push({ role, content });
     }
   }
 
-  messages.push({
-    role: 'user',
-    content: message
-  });
+  // Gemini conversation must start with a user message.
+  while (
+    messages.length &&
+    messages[0].role === 'assistant'
+  ) {
+    messages.shift();
+  }
+
+  const previous = messages[messages.length - 1];
+
+  if (previous && previous.role === 'user') {
+    previous.content += '\n' + message;
+  } else {
+    messages.push({
+      role: 'user',
+      content: message
+    });
+  }
 
   return messages;
 }
 
+// =====================================
+// SAFE API RESPONSE READER
+// =====================================
+
+async function readResponse(response) {
+  const text = await response.text();
+
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {
+      error: {
+        message: 'Invalid response received from AI provider.'
+      }
+    };
+  }
+}
+
+function providerError(name, status, data) {
+  const message =
+    data?.error?.message ||
+    data?.message ||
+    'Unknown provider error';
+
+  const error = new Error(
+    `${name} HTTP ${status}: ${String(message).slice(0, 500)}`
+  );
+
+  error.status = status;
+  return error;
+}
+
+// =====================================
 // GOOGLE GEMINI AI
+// =====================================
+
 async function askGemini(messages) {
+  if (!GEMINI_API_KEY) {
+    throw new Error('Gemini API key is missing.');
+  }
 
   const contents = messages.map(item => ({
     role: item.role === 'assistant' ? 'model' : 'user',
@@ -88,13 +183,14 @@ async function askGemini(messages) {
   }));
 
   const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
 
   const response = await fetch(url, {
     method: 'POST',
 
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'x-goog-api-key': GEMINI_API_KEY
     },
 
     body: JSON.stringify({
@@ -110,27 +206,33 @@ async function askGemini(messages) {
       }
     }),
 
-    signal: AbortSignal.timeout(45000)
+    signal: AbortSignal.timeout(TIMEOUT)
   });
 
-  const data = await response.json().catch(() => ({}));
+  const data = await readResponse(response);
 
   if (!response.ok) {
+    throw providerError('Gemini', response.status, data);
+  }
+
+  if (data.promptFeedback?.blockReason) {
     throw new Error(
-      data?.error?.message ||
-      `Gemini request failed (${response.status})`
+      `Gemini request blocked: ${data.promptFeedback.blockReason}`
     );
   }
 
-  const answer =
-    (data?.candidates?.[0]?.content?.parts || [])
-      .map(part => part.text || '')
-      .filter(Boolean)
-      .join('\n')
-      .trim();
+  const answer = (
+    data?.candidates?.[0]?.content?.parts || []
+  )
+    .filter(part => typeof part.text === 'string')
+    .map(part => part.text)
+    .join('\n')
+    .trim();
 
   if (!answer) {
-    throw new Error('Gemini returned no text.');
+    throw new Error(
+      'Gemini returned an empty response.'
+    );
   }
 
   return {
@@ -140,8 +242,14 @@ async function askGemini(messages) {
   };
 }
 
+// =====================================
 // GROQ AI
+// =====================================
+
 async function askGroq(messages) {
+  if (!GROQ_API_KEY) {
+    throw new Error('Groq API key is missing.');
+  }
 
   const response = await fetch(
     'https://api.groq.com/openai/v1/chat/completions',
@@ -165,173 +273,246 @@ async function askGroq(messages) {
         ],
 
         temperature: 0.7,
-        max_tokens: 2048
+        max_completion_tokens: 2048
       }),
 
-      signal: AbortSignal.timeout(45000)
+      signal: AbortSignal.timeout(TIMEOUT)
     }
   );
 
-  const data = await response.json().catch(() => ({}));
+  const data = await readResponse(response);
 
   if (!response.ok) {
-    throw new Error(
-      data?.error?.message ||
-      `Groq request failed (${response.status})`
-    );
+    throw providerError('Groq', response.status, data);
   }
 
   const answer =
-    data?.choices?.[0]?.message?.content?.trim();
+    data?.choices?.[0]?.message?.content;
 
-  if (!answer) {
-    throw new Error('Groq returned no text.');
+  if (typeof answer !== 'string' || !answer.trim()) {
+    throw new Error('Groq returned an empty response.');
   }
 
   return {
-    reply: answer,
+    reply: answer.trim(),
     provider: 'Groq',
     model: GROQ_MODEL
   };
 }
 
-// BACKEND HEALTH CHECK
+// =====================================
+// PROVIDER ORDER
+// =====================================
+
+function getProviders() {
+  const providers = {
+    gemini: {
+      name: 'Google Gemini',
+      enabled: Boolean(GEMINI_API_KEY),
+      call: askGemini
+    },
+
+    groq: {
+      name: 'Groq',
+      enabled: Boolean(GROQ_API_KEY),
+      call: askGroq
+    }
+  };
+
+  const order = PRIMARY_PROVIDER === 'groq'
+    ? ['groq', 'gemini']
+    : ['gemini', 'groq'];
+
+  return order
+    .map(name => providers[name])
+    .filter(provider => provider.enabled);
+}
+
+// =====================================
+// HEALTH CHECK
+// =====================================
+
 app.get('/api/health', (_req, res) => {
-
-  const available = [];
-
-  if (GEMINI_API_KEY) {
-    available.push('Google Gemini');
-  }
-
-  if (GROQ_API_KEY) {
-    available.push('Groq');
-  }
+  const providers = getProviders();
 
   res.json({
     ok: true,
     backend: 'online',
 
-    aiConfigured: available.length > 0,
+    aiConfigured: providers.length > 0,
 
-    provider: available.length
-      ? available.join(' + ')
-      : null,
+    providers: providers.map(provider => provider.name),
 
     primaryProvider: PRIMARY_PROVIDER,
 
-    model: GEMINI_API_KEY
-      ? GEMINI_MODEL
-      : (GROQ_API_KEY ? GROQ_MODEL : null),
+    models: {
+      gemini: GEMINI_API_KEY ? GEMINI_MODEL : null,
+      groq: GROQ_API_KEY ? GROQ_MODEL : null
+    },
 
-    availableProviders: available,
-
-    version: 'NOVA V10.1'
+    version: 'NOVA V11'
   });
 });
 
+// =====================================
+// PROVIDER STATUS
+// =====================================
+
+app.get('/api/providers', (_req, res) => {
+  res.json({
+    ok: true,
+
+    gemini: {
+      configured: Boolean(GEMINI_API_KEY),
+      model: GEMINI_API_KEY ? GEMINI_MODEL : null
+    },
+
+    groq: {
+      configured: Boolean(GROQ_API_KEY),
+      model: GROQ_API_KEY ? GROQ_MODEL : null
+    },
+
+    primary: PRIMARY_PROVIDER
+  });
+});
+
+// =====================================
 // NOVA AI CHAT
+// =====================================
+
 app.post('/api/chat', async (req, res) => {
+  try {
+    const message = String(
+      req.body?.message || ''
+    ).trim();
 
-  const message =
-    String(req.body?.message || '').trim();
+    if (!message) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Please enter a message.'
+      });
+    }
 
-  const history =
-    Array.isArray(req.body?.history)
-      ? req.body.history.slice(-12)
+    if (message.length > 10000) {
+      return res.status(413).json({
+        ok: false,
+        error: 'Message is too long.'
+      });
+    }
+
+    const providers = getProviders();
+
+    if (!providers.length) {
+      return res.status(503).json({
+        ok: false,
+        error: 'No AI provider configured. Add GEMINI_API_KEY or GROQ_API_KEY in Render.'
+      });
+    }
+
+    const history = Array.isArray(req.body?.history)
+      ? req.body.history
       : [];
 
-  if (!message) {
-    return res.status(400).json({
-      ok: false,
-      error: 'Message is required.'
-    });
-  }
+    const messages = makeMessages(history, message);
 
-  if (message.length > 10000) {
-    return res.status(413).json({
-      ok: false,
-      error: 'Message is too long.'
-    });
-  }
+    const errors = [];
 
-  if (!GEMINI_API_KEY && !GROQ_API_KEY) {
-    return res.status(503).json({
-      ok: false,
-      error: 'Add GEMINI_API_KEY and/or GROQ_API_KEY in Render Environment.'
-    });
-  }
+    for (const provider of providers) {
+      try {
+        console.log(
+          `NOVA trying provider: ${provider.name}`
+        );
 
-  const messages = makeMessages(history, message);
+        const result = await provider.call(messages);
 
-  // AUTOMATIC PROVIDER FALLBACK
-  const providers = PRIMARY_PROVIDER === 'groq'
-    ? [
-        GROQ_API_KEY ? ['Groq', askGroq] : null,
-        GEMINI_API_KEY ? ['Google Gemini', askGemini] : null
-      ].filter(Boolean)
+        console.log(
+          `NOVA success: ${provider.name}`
+        );
 
-    : [
-        GEMINI_API_KEY ? ['Google Gemini', askGemini] : null,
-        GROQ_API_KEY ? ['Groq', askGroq] : null
-      ].filter(Boolean);
+        return res.json({
+          ok: true,
+          ...result,
+          fallbackUsed: errors.length > 0,
+          version: 'NOVA V11'
+        });
 
-  const errors = [];
+      } catch (error) {
+        console.error(
+          `${provider.name} failed:`,
+          error.message
+        );
 
-  for (const [name, callProvider] of providers) {
-
-    try {
-
-      const result = await callProvider(messages);
-
-      return res.json({
-        ok: true,
-        ...result,
-        fallbackUsed: errors.length > 0
-      });
-
-    } catch (err) {
-
-      console.error(
-        `${name} provider error:`,
-        err.message
-      );
-
-      errors.push(`${name}: ${err.message}`);
+        errors.push({
+          provider: provider.name,
+          error: error.message
+        });
+      }
     }
+
+    return res.status(502).json({
+      ok: false,
+
+      error: 'All AI providers failed.',
+
+      details: errors,
+
+      suggestion:
+        'Check API key, model access, quota and provider logs.'
+    });
+
+  } catch (error) {
+    console.error('NOVA chat error:', error);
+
+    return res.status(500).json({
+      ok: false,
+      error: 'Internal NOVA server error.'
+    });
   }
-
-  return res.status(502).json({
-    ok: false,
-
-    error:
-      'All configured AI providers failed. Check API keys and provider limits.',
-
-    details: errors
-  });
 });
 
+// =====================================
 // HOME PAGE
-app.get('/', (_req, res) => {
+// =====================================
 
-  const indexFile =
-    path.join(frontendDir, 'index.html');
+app.get('/', (_req, res) => {
+  const indexFile = path.join(
+    frontendDir,
+    'index.html'
+  );
 
   if (!fs.existsSync(indexFile)) {
     return res.status(404).send(
-      'NOVA frontend not found. Put index.html inside public folder.'
+      'NOVA frontend not found.'
     );
   }
 
   return res.sendFile(indexFile);
 });
 
+// =====================================
+// ERROR HANDLER
+// =====================================
+
+app.use((err, _req, res, _next) => {
+  console.error('Server error:', err.message);
+
+  res.status(500).json({
+    ok: false,
+    error: 'NOVA server encountered an error.'
+  });
+});
+
+// =====================================
 // START SERVER
+// =====================================
+
 app.listen(PORT, '0.0.0.0', () => {
+  console.log('================================');
+  console.log('       NOVA V11 ONLINE');
+  console.log('================================');
 
-  console.log(`NOVA V10.1 listening on port ${PORT}`);
-
-  console.log(`Frontend directory: ${frontendDir}`);
+  console.log(`Port: ${PORT}`);
+  console.log(`Frontend: ${frontendDir}`);
 
   console.log(
     `Gemini configured: ${Boolean(GEMINI_API_KEY)}`
@@ -340,4 +521,11 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(
     `Groq configured: ${Boolean(GROQ_API_KEY)}`
   );
+
+  console.log(
+    `Primary provider: ${PRIMARY_PROVIDER}`
+  );
+
+  console.log('Automatic fallback: ENABLED');
+  console.log('================================');
 });
