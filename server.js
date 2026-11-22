@@ -8,9 +8,9 @@ const fs = require('fs');
 const app = express();
 const PORT = Number(process.env.PORT) || 10000;
 
-// =====================================
-// NOVA V11 - AI CONFIGURATION
-// =====================================
+// ========================================
+// NOVA V11 CONFIGURATION
+// ========================================
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -29,21 +29,25 @@ const TIMEOUT = 45000;
 const SYSTEM_PROMPT = `
 You are NOVA, a helpful personal AI assistant.
 
-Your responsibilities:
-- Help the user with daily tasks and questions.
+Your purpose:
+- Help with everyday tasks.
 - Understand Hindi, English and Hinglish.
-- Reply in the language used by the user.
-- Give clear, practical and accurate answers.
-- Help with technology, business, learning and research.
-- Never pretend that an action was completed if it was not.
+- Reply in the user's language.
+- Help with coding, technology and business.
+- Explain difficult things simply.
+- Give accurate and practical answers.
+- Never claim an action was completed if it was not.
+- Never claim to be ChatGPT or GPT-4.
+- Never guess your model identity.
+- Never promise guaranteed income.
 - Ask permission before consequential external actions.
-- Never promise guaranteed financial earnings.
-- Keep answers friendly and useful.
+
+You are NOVA. Be helpful, honest and friendly.
 `;
 
-// =====================================
-// FRONTEND
-// =====================================
+// ========================================
+// FRONTEND DIRECTORY
+// ========================================
 
 const publicDir = path.join(__dirname, 'public');
 
@@ -53,8 +57,13 @@ const frontendDir = fs.existsSync(
 
 app.disable('x-powered-by');
 
+// ========================================
+// CORS
+// ========================================
+
 app.use((req, res, next) => {
-  const origin = process.env.NOVA_ALLOWED_ORIGIN || '*';
+  const origin =
+    process.env.NOVA_ALLOWED_ORIGIN || '*';
 
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader(
@@ -76,9 +85,9 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(frontendDir));
 
-// =====================================
-// MESSAGE VALIDATION
-// =====================================
+// ========================================
+// MESSAGE HISTORY
+// ========================================
 
 function makeMessages(history, message) {
   const messages = [];
@@ -90,10 +99,10 @@ function makeMessages(history, message) {
   for (const item of items) {
     if (!item || typeof item !== 'object') continue;
 
-    const role = item.role === 'assistant'
-      ? 'assistant'
-      : item.role === 'user'
-        ? 'user'
+    const role =
+      item.role === 'assistant' ||
+      item.role === 'user'
+        ? item.role
         : null;
 
     if (!role) continue;
@@ -106,7 +115,6 @@ function makeMessages(history, message) {
 
     const previous = messages[messages.length - 1];
 
-    // Merge consecutive messages of the same role.
     if (previous && previous.role === role) {
       previous.content += '\n' + content;
     } else {
@@ -114,7 +122,6 @@ function makeMessages(history, message) {
     }
   }
 
-  // Gemini conversation must start with a user message.
   while (
     messages.length &&
     messages[0].role === 'assistant'
@@ -122,10 +129,10 @@ function makeMessages(history, message) {
     messages.shift();
   }
 
-  const previous = messages[messages.length - 1];
+  const last = messages[messages.length - 1];
 
-  if (previous && previous.role === 'user') {
-    previous.content += '\n' + message;
+  if (last && last.role === 'user') {
+    last.content += '\n' + message;
   } else {
     messages.push({
       role: 'user',
@@ -136,49 +143,45 @@ function makeMessages(history, message) {
   return messages;
 }
 
-// =====================================
-// SAFE API RESPONSE READER
-// =====================================
+// ========================================
+// RESPONSE READER
+// ========================================
 
 async function readResponse(response) {
-  const text = await response.text();
+  const body = await response.text();
 
   try {
-    return text ? JSON.parse(text) : {};
+    return body ? JSON.parse(body) : {};
   } catch {
-    return {
-      error: {
-        message: 'Invalid response received from AI provider.'
-      }
-    };
+    return {};
   }
 }
 
-function providerError(name, status, data) {
+function createProviderError(name, status, data) {
   const message =
     data?.error?.message ||
     data?.message ||
     'Unknown provider error';
 
-  const error = new Error(
+  return new Error(
     `${name} HTTP ${status}: ${String(message).slice(0, 500)}`
   );
-
-  error.status = status;
-  return error;
 }
 
-// =====================================
-// GOOGLE GEMINI AI
-// =====================================
+// ========================================
+// GEMINI AI
+// ========================================
 
 async function askGemini(messages) {
   if (!GEMINI_API_KEY) {
-    throw new Error('Gemini API key is missing.');
+    throw new Error('Gemini API key missing.');
   }
 
   const contents = messages.map(item => ({
-    role: item.role === 'assistant' ? 'model' : 'user',
+    role: item.role === 'assistant'
+      ? 'model'
+      : 'user',
+
     parts: [{ text: item.content }]
   }));
 
@@ -212,26 +215,24 @@ async function askGemini(messages) {
   const data = await readResponse(response);
 
   if (!response.ok) {
-    throw providerError('Gemini', response.status, data);
-  }
-
-  if (data.promptFeedback?.blockReason) {
-    throw new Error(
-      `Gemini request blocked: ${data.promptFeedback.blockReason}`
+    throw createProviderError(
+      'Gemini',
+      response.status,
+      data
     );
   }
 
   const answer = (
     data?.candidates?.[0]?.content?.parts || []
   )
-    .filter(part => typeof part.text === 'string')
-    .map(part => part.text)
+    .map(part => part.text || '')
+    .filter(Boolean)
     .join('\n')
     .trim();
 
   if (!answer) {
     throw new Error(
-      'Gemini returned an empty response.'
+      'Gemini returned no answer.'
     );
   }
 
@@ -242,13 +243,13 @@ async function askGemini(messages) {
   };
 }
 
-// =====================================
+// ========================================
 // GROQ AI
-// =====================================
+// ========================================
 
 async function askGroq(messages) {
   if (!GROQ_API_KEY) {
-    throw new Error('Groq API key is missing.');
+    throw new Error('Groq API key missing.');
   }
 
   const response = await fetch(
@@ -272,7 +273,6 @@ async function askGroq(messages) {
           ...messages
         ],
 
-        temperature: 0.7,
         max_completion_tokens: 2048
       }),
 
@@ -283,14 +283,21 @@ async function askGroq(messages) {
   const data = await readResponse(response);
 
   if (!response.ok) {
-    throw providerError('Groq', response.status, data);
+    throw createProviderError(
+      'Groq',
+      response.status,
+      data
+    );
   }
 
   const answer =
     data?.choices?.[0]?.message?.content;
 
-  if (typeof answer !== 'string' || !answer.trim()) {
-    throw new Error('Groq returned an empty response.');
+  if (
+    typeof answer !== 'string' ||
+    !answer.trim()
+  ) {
+    throw new Error('Groq returned no answer.');
   }
 
   return {
@@ -300,20 +307,22 @@ async function askGroq(messages) {
   };
 }
 
-// =====================================
-// PROVIDER ORDER
-// =====================================
+// ========================================
+// PROVIDER SELECTION
+// ========================================
 
 function getProviders() {
   const providers = {
     gemini: {
       name: 'Google Gemini',
+      model: GEMINI_MODEL,
       enabled: Boolean(GEMINI_API_KEY),
       call: askGemini
     },
 
     groq: {
       name: 'Groq',
+      model: GROQ_MODEL,
       enabled: Boolean(GROQ_API_KEY),
       call: askGroq
     }
@@ -324,13 +333,13 @@ function getProviders() {
     : ['gemini', 'groq'];
 
   return order
-    .map(name => providers[name])
+    .map(key => providers[key])
     .filter(provider => provider.enabled);
 }
 
-// =====================================
+// ========================================
 // HEALTH CHECK
-// =====================================
+// ========================================
 
 app.get('/api/health', (_req, res) => {
   const providers = getProviders();
@@ -338,47 +347,57 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     backend: 'online',
-
     aiConfigured: providers.length > 0,
-
-    providers: providers.map(provider => provider.name),
 
     primaryProvider: PRIMARY_PROVIDER,
 
+    availableProviders: providers.map(p => p.name),
+
     models: {
-      gemini: GEMINI_API_KEY ? GEMINI_MODEL : null,
-      groq: GROQ_API_KEY ? GROQ_MODEL : null
+      gemini: GEMINI_API_KEY
+        ? GEMINI_MODEL
+        : null,
+
+      groq: GROQ_API_KEY
+        ? GROQ_MODEL
+        : null
     },
 
     version: 'NOVA V11'
   });
 });
 
-// =====================================
+// ========================================
 // PROVIDER STATUS
-// =====================================
+// ========================================
 
 app.get('/api/providers', (_req, res) => {
   res.json({
     ok: true,
 
+    primary: PRIMARY_PROVIDER,
+
     gemini: {
       configured: Boolean(GEMINI_API_KEY),
-      model: GEMINI_API_KEY ? GEMINI_MODEL : null
+      model: GEMINI_API_KEY
+        ? GEMINI_MODEL
+        : null
     },
 
     groq: {
       configured: Boolean(GROQ_API_KEY),
-      model: GROQ_API_KEY ? GROQ_MODEL : null
+      model: GROQ_API_KEY
+        ? GROQ_MODEL
+        : null
     },
 
-    primary: PRIMARY_PROVIDER
+    version: 'NOVA V11'
   });
 });
 
-// =====================================
-// NOVA AI CHAT
-// =====================================
+// ========================================
+// NOVA CHAT
+// ========================================
 
 app.post('/api/chat', async (req, res) => {
   try {
@@ -389,7 +408,7 @@ app.post('/api/chat', async (req, res) => {
     if (!message) {
       return res.status(400).json({
         ok: false,
-        error: 'Please enter a message.'
+        error: 'Message is required.'
       });
     }
 
@@ -405,7 +424,7 @@ app.post('/api/chat', async (req, res) => {
     if (!providers.length) {
       return res.status(503).json({
         ok: false,
-        error: 'No AI provider configured. Add GEMINI_API_KEY or GROQ_API_KEY in Render.'
+        error: 'No AI provider configured.'
       });
     }
 
@@ -413,7 +432,10 @@ app.post('/api/chat', async (req, res) => {
       ? req.body.history
       : [];
 
-    const messages = makeMessages(history, message);
+    const messages = makeMessages(
+      history,
+      message
+    );
 
     const errors = [];
 
@@ -451,17 +473,17 @@ app.post('/api/chat', async (req, res) => {
 
     return res.status(502).json({
       ok: false,
-
       error: 'All AI providers failed.',
-
       details: errors,
-
       suggestion:
-        'Check API key, model access, quota and provider logs.'
+        'Check API keys, model access and provider quota.'
     });
 
   } catch (error) {
-    console.error('NOVA chat error:', error);
+    console.error(
+      'NOVA chat error:',
+      error.message
+    );
 
     return res.status(500).json({
       ok: false,
@@ -470,9 +492,9 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// =====================================
+// ========================================
 // HOME PAGE
-// =====================================
+// ========================================
 
 app.get('/', (_req, res) => {
   const indexFile = path.join(
@@ -489,22 +511,25 @@ app.get('/', (_req, res) => {
   return res.sendFile(indexFile);
 });
 
-// =====================================
+// ========================================
 // ERROR HANDLER
-// =====================================
+// ========================================
 
 app.use((err, _req, res, _next) => {
-  console.error('Server error:', err.message);
+  console.error(
+    'Server error:',
+    err.message
+  );
 
   res.status(500).json({
     ok: false,
-    error: 'NOVA server encountered an error.'
+    error: 'NOVA server error.'
   });
 });
 
-// =====================================
+// ========================================
 // START SERVER
-// =====================================
+// ========================================
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('================================');
