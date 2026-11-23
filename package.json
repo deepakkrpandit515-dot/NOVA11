@@ -1,16 +1,15 @@
 {
-  "name": "nova-v7-personal-ai",
-  "version": "7.0.0",
+  "name": "nova-v11-personal-ai",
+  "version": "11.0.0",
   "private": true,
-  "description": "NOVA V7 personal AI assistant",
+  "description": "NOVA V11 personal AI assistant \u2014 Gemini and Groq backend",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js && node --check public/nova3d.js"
   },
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {
-    "express": "^4.21.2"
-  }
+  "dependencies": {}
 }

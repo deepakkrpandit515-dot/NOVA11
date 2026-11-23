@@ -23,9 +23,19 @@ async function checkBackend() {
     const response = await fetch(api("/api/health"), { method: "GET" });
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error("Health check failed");
-    setStatus(true, data.aiConfigured ? "Backend + AI online" : "Backend online • AI key missing");
-    $("backendResult").textContent = `Backend online • ${data.version} • AI configured: ${data.aiConfigured}`;
-    $("chatHint").textContent = data.aiConfigured ? "AI connection configured." : "Backend online hai, lekin OPENAI_API_KEY hosting Environment mein set nahi hai.";
+    const configured = data.providers || {};
+    const models = data.models || {};
+    const labels = [];
+    if (configured.gemini) labels.push(`Gemini (${models.gemini || "model set"})`);
+    if (configured.groq) labels.push(`Groq (${models.groq || "model set"})`);
+    setStatus(true, data.aiConfigured ? "Backend online • AI keys found" : "Backend online • AI keys missing");
+    $("backendResult").textContent = `Backend online • ${data.version || "NOVA V11"} • Configured: ${labels.join(" + ") || "none"}`;
+    const note = data.aiConfigured
+      ? `Keys configured: ${labels.join(" + ")}. Actual provider access is confirmed only after a successful chat request.`
+      : "Backend online hai, lekin Render Environment mein GEMINI_API_KEY ya GROQ_API_KEY set nahi hai.";
+    $("chatHint").textContent = note;
+    const providerStatus = $("providerStatus");
+    if (providerStatus) providerStatus.textContent = note;
   } catch (error) {
     setStatus(false, "Backend offline");
     $("backendResult").textContent = "Connection failed: " + error.message + ". Hosted HTTPS frontend use karein aur CORS settings check karein.";
@@ -60,6 +70,10 @@ $("chatForm").addEventListener("submit", async event => {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
     const reply = data.reply || "No reply received.";
+    const used = data.provider && data.model ? `Last reply: ${data.provider} • ${data.model}${data.fallbackUsed ? " (backup provider)" : ""}` : "AI reply received.";
+    $("chatHint").textContent = used;
+    const providerStatus = $("providerStatus");
+    if (providerStatus) providerStatus.textContent = used;
     addBubble("nova", reply);
     if ("speechSynthesis" in window) {
       speechSynthesis.cancel();
@@ -381,7 +395,7 @@ const exportBackupButton = $("exportBackup");
 const importBackupInput = $("importBackup");
 const backupStatus = $("backupStatus");
 if (exportBackupButton) exportBackupButton.addEventListener("click", () => {
-  const payload = { app: "NOVA V7", formatVersion: 1, exportedAt: new Date().toISOString(), data: {} };
+  const payload = { app: "NOVA V11", formatVersion: 1, exportedAt: new Date().toISOString(), data: {} };
   NOVA_DATA_KEYS.forEach(key => {
     const value = localStorage.getItem(key);
     if (value !== null) payload.data[key] = value;
@@ -389,7 +403,7 @@ if (exportBackupButton) exportBackupButton.addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = url; link.download = `nova-v7-backup-${new Date().toISOString().slice(0,10)}.json`;
+  link.href = url; link.download = `nova-v11-backup-${new Date().toISOString().slice(0,10)}.json`;
   link.click(); URL.revokeObjectURL(url);
   if (backupStatus) backupStatus.textContent = "Backup file downloaded. Ise private jagah par rakhein.";
 });
@@ -399,8 +413,8 @@ if (importBackupInput) importBackupInput.addEventListener("change", async () => 
   try {
     if (file.size > 2 * 1024 * 1024) throw new Error("Backup file 2 MB se chhoti honi chahiye.");
     const payload = JSON.parse(await file.text());
-    if (payload.app !== "NOVA V7" || payload.formatVersion !== 1 || !payload.data || typeof payload.data !== "object") {
-      throw new Error("Yeh valid NOVA V7 backup nahi hai.");
+    if (!["NOVA V7", "NOVA V11"].includes(payload.app) || payload.formatVersion !== 1 || !payload.data || typeof payload.data !== "object") {
+      throw new Error("Yeh valid NOVA backup nahi hai.");
     }
     if (!confirm("Current local NOVA data selected backup se replace hoga. Continue?")) return;
     NOVA_DATA_KEYS.forEach(key => {

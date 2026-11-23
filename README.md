@@ -1,28 +1,32 @@
-# NOVA V8 — Android-friendly Personal AI Assistant
+# NOVA V11 — Final consolidated project
 
-This package repairs the frontend/backend asset mismatch in the supplied NOVA project: the Express server serves `public/`, so the full interface, current app script, stylesheet, manifest, service worker, and Three.js avatar module are all included in `public/`.
-
-## Run / deploy on Render
-1. Extract this ZIP and upload the **contents** of `NOVA11-main` to the root of your GitHub repository (keep the `public` folder).
-2. In Render, create/use a **Web Service** connected to that repository.
-3. Runtime: Node. Build command: `npm install`. Start command: `npm start`.
-4. In Render → Environment, add `OPENAI_API_KEY` and (optionally) `OPENAI_MODEL`. Keep the key secret; do not put it in GitHub or the browser.
-5. Deploy and open `https://YOUR-SERVICE.onrender.com/api/health`. Then open the service homepage → Settings → Check Backend.
+This package consolidates the NOVA11 source project and the later V11 Gemini/Groq backend into one consistent deployment. The backend uses Node.js built-ins, so no external npm package is required. The stale V9 `public/` interface has been replaced with the full dashboard, its matching JavaScript/CSS/3D assets, and V11 branding.
 
 ## Included
-- Mobile-first NOVA interface and browser-local modules
-- Voice input/output where supported by the browser; RUKO/STOP controls
-- Interactive procedural 3D avatar using Three.js CDN (requires internet/WebGL)
-- Express backend with `/api/health` and `/api/chat`
-- PWA manifest and service worker
+- `server.js` — Gemini primary + Groq automatic fallback, health/provider status, and chat API
+- `public/` — one authoritative frontend (index, app, styles, 3D scene, PWA manifest/service worker/icon)
+- `package.json`, `.env.example`
 
-## Important limitations
-- `/api/health` confirms server reachability, not that AI is configured. AI chat requires a valid API key, available model, and API credits.
-- The 3D avatar is procedural/stylized, not a photorealistic human avatar.
-- Market data, automatic global research, bank/UPI integration, payouts, social auto-posting, cloud file storage, and persistent server-side memory are not connected.
-- Money entries, notes, tasks, and drafts are local browser records, not actual income or bank balances.
-- Cloud hosting can keep the backend available while the phone is off; browser voice features still require the browser/app to be open. Free hosting may sleep when idle.
-- Never enter passwords, OTPs, bank credentials, or API keys into notes or frontend settings.
+## Deploy to the existing Render Web Service
+1. Extract this ZIP. Upload the **contents** of the `NOVA_V11_FINAL` folder to the root of your existing `NOVA11` GitHub repository, replacing the old files. Keep the `public` folder intact.
+2. Render service settings: Runtime `Node`; Build command `npm install`; Start command `npm start`.
+3. In Render → Environment, keep only one entry for each variable below (no duplicate names):
+   - `GEMINI_API_KEY` — optional, Google AI Studio key
+   - `GROQ_API_KEY` — optional backup key
+   - `GEMINI_MODEL` — optional; default `gemini-3.5-flash-lite`
+   - `GROQ_MODEL` — optional; default `openai/gpt-oss-20b`
+   - `NOVA_PRIMARY_PROVIDER` — optional `gemini` or `groq`; default `gemini`
+4. Save and deploy. Do not add real keys to GitHub, frontend files, or chat.
+5. Verify `https://YOUR-RENDER-SERVICE.onrender.com/api/health` and `/api/providers`.
+6. Open the service root URL and use Settings → Check Backend. Send a chat message; the interface will show the actual provider and model used for that successful response.
 
-## Local test
-Requires Node.js 20+. Run `npm install` then `npm start`; open `http://localhost:10000`.
+## Important status meanings
+- `aiConfigured: true` means at least one key is present in the server environment. It does **not** prove that the key has quota or that the model is currently available.
+- A successful `/api/chat` response includes `provider` and `model`; this is the confirmation of which provider actually answered.
+- If the primary provider fails, the server tries the other configured provider. If both fail, NOVA shows an error rather than pretending a local reply came from an AI model.
+
+## Current feature boundaries
+The dashboard includes chat, browser voice controls, tasks, local money records, research shortcuts, social drafts, local files/memory and photo/video preview tools. These are not the same as live market feeds, automatic web research, bank/UPI transfers, cloud file storage, automatic social publishing, or phone-off background agents; those integrations are not included. Money and payout areas are record-keeping demos only. Income is not guaranteed. External actions remain owner-controlled and require separate trusted integrations and explicit approval.
+
+## Local data and compatibility
+The frontend retains existing `nova9_*` browser storage keys so previously saved local tasks, notes, money entries and drafts are not intentionally renamed. Backup restore accepts the previous NOVA V7 backup format as well as V11. The new service-worker cache is versioned to replace stale cached UI files.

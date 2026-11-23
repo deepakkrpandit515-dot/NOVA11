@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#070b18">
-  <meta name="description" content="NOVA V7 Personal AI Assistant">
+  <meta name="description" content="NOVA V11 Personal AI Assistant">
   <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/style.css">
-  <title>NOVA V7 • Personal AI</title>
+  <title>NOVA V11 • Personal AI</title>
 </head>
 <body>
 <div class="app">
   <header class="topbar">
-    <div class="brand"><div class="logo">N</div><div><b>NOVA V7</b><small>PERSONAL AI • GLOBAL INTELLIGENCE</small></div></div>
+    <div class="brand"><div class="logo">N</div><div><b>NOVA V11</b><small>PERSONAL AI • GLOBAL INTELLIGENCE</small></div></div>
     <div class="status"><i id="statusDot"></i><span id="statusText">Checking</span></div>
   </header>
 
@@ -20,7 +20,7 @@
     <section class="hero panel" id="home">
       <div class="hero-text">
         <div class="eyebrow">HUMAN-CONTROLLED AI SYSTEM</div>
-        <h1>Welcome to<br><span>NOVA V7</span></h1>
+        <h1>Welcome to<br><span>NOVA V11</span></h1>
         <p>Namaste! Main aapki AI assistant hoon. Text ya voice se baat shuru karein.</p>
         <div class="actions">
           <button class="btn primary" id="voiceStart">🎙 START VOICE</button>
@@ -57,7 +57,7 @@
       <div class="section-head"><div><div class="eyebrow">NOVA INTELLIGENCE</div><h2>AI Chat</h2></div><span class="pill">AI BACKEND</span></div>
       <div class="chat-log" id="chatLog" aria-live="polite"><div class="bubble nova"><b>NOVA</b><p>Namaste! Backend aur AI key connect hone par main jawab de sakti hoon.</p></div></div>
       <form id="chatForm" class="chat-form"><textarea id="message" rows="2" placeholder="NOVA se kuch poochhein..." required></textarea><button class="btn primary" type="submit">SEND ➤</button></form>
-      <p class="hint" id="chatHint">AI chat ke liye backend online aur API key configured honi chahiye.</p>
+      <p class="hint" id="chatHint">AI chat ke liye backend aur kam se kam ek working provider key chahiye.</p>
     </section>
 
     <section class="page panel" id="market">
@@ -157,7 +157,12 @@
       <label class="field">Backend base URL<input id="backendUrl" type="url" placeholder="https://your-service.onrender.com"></label>
       <div class="actions"><button class="btn primary" id="checkBackend">CHECK BACKEND</button><button class="btn secondary" id="saveSettings">SAVE SETTINGS</button></div>
       <p id="backendResult" class="hint">Backend URL enter karke Check Backend dabayein.</p>
-      <div class="tile"><h3>AI Provider</h3><p>API key sirf hosting provider ke Environment Variables mein set karein. HTML ya GitHub mein secret key kabhi na daalein.</p><p><b>OPENAI_API_KEY</b> = Render Environment setting</p><p><b>OPENAI_MODEL</b> = gpt-5.6 (ya aapke account mein available model)</p></div>
+      <div class="tile"><h3>AI Provider</h3><p>API key sirf hosting provider ke Environment Variables mein set karein. HTML ya GitHub mein secret key kabhi na daalein.</p><p><b>GEMINI_API_KEY</b> = Render Environment setting (optional)</p>
+      <p><b>GROQ_API_KEY</b> = Render Environment setting (optional backup)</p>
+      <p><b>GEMINI_MODEL</b> = gemini-3.5-flash-lite (default)</p>
+      <p><b>GROQ_MODEL</b> = openai/gpt-oss-20b (default)</p>
+      <p><b>NOVA_PRIMARY_PROVIDER</b> = gemini or groq (default: gemini)</p>
+      <p id="providerStatus" class="hint">Provider status will appear after backend check. Configured keys do not guarantee that the provider quota/model is currently available.</p></div>
       <div class="tile"><h3>System limitations</h3><p>Market prices, global search, cloud file storage, bank sync, background phone-off execution aur external actions abhi integrated nahi hain. Inke liye alag trusted providers, permissions aur setup chahiye.</p></div>
       <div class="tile"><h3>Backup & Restore</h3><p>Tasks, notes, money records aur social drafts ka encrypted nahi, local JSON backup bana sakte hain. Backup file ko private rakhein.</p><div class="actions"><button class="btn primary" id="exportBackup" type="button">⬇ EXPORT NOVA BACKUP</button><label class="btn secondary" for="importBackup">IMPORT BACKUP</label><input id="importBackup" type="file" accept="application/json,.json" hidden></div><p class="hint" id="backupStatus" aria-live="polite">Backup isi device par manually save/restore hota hai.</p></div>
       <div class="tile"><h3>Privacy & Local Data</h3><p>NOVA ke local notes aur records isi browser ke storage mein hain. Shared phone par private information save na karein.</p><button class="btn stop" id="clearLocalData" type="button">CLEAR NOVA LOCAL DATA</button></div>

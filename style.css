@@ -8,7 +8,7 @@
 input[type="range"]{padding:0;accent-color:#55e7f5}
 
 
-/* ===== NOVA 9: unified 3D holographic interface ===== */
+/* ===== NOVA V11: unified 3D holographic interface ===== */
 :root{
   --glass:rgba(13,25,47,.82);
   --edge:rgba(85,231,245,.30);

@@ -1,556 +1,276 @@
-
 'use strict';
 
-const express = require('express');
-const path = require('path');
-const fs = require('fs');
+/**
+ * NOVA V11 — dependency-free Node.js backend.
+ * Gemini primary + Groq automatic fallback.
+ * Node.js 20+ is required (built-in fetch and AbortSignal.timeout).
+ */
+const http = require('node:http');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 
-const app = express();
 const PORT = Number(process.env.PORT) || 10000;
-
-// ========================================
-// NOVA V11 CONFIGURATION
-// ========================================
-
+const PUBLIC_DIR = path.resolve(__dirname, 'public');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+const PRIMARY_PROVIDER = String(process.env.NOVA_PRIMARY_PROVIDER || 'gemini').trim().toLowerCase() === 'groq' ? 'groq' : 'gemini';
+const REQUEST_TIMEOUT_MS = 45000;
+const MAX_BODY_BYTES = 1_000_000;
+const MAX_MESSAGE_CHARS = 8000;
+const MAX_HISTORY_ITEMS = 12;
+const MAX_HISTORY_ITEM_CHARS = 4000;
 
-const GEMINI_MODEL =
-  process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+const SYSTEM_PROMPT = [
+  'You are NOVA, a helpful personal AI assistant.',
+  "Understand Hindi, English and Hinglish; reply in the user's language.",
+  'Be clear, practical, accurate and honest about limitations.',
+  'Never claim to have searched live data or completed an action unless a connected tool actually did it.',
+  'Ask permission before consequential external actions such as payments, purchases, messages, account changes or contracts.',
+  'For money and business topics, explain uncertainty and never guarantee earnings.'
+].join(' ');
 
-const GROQ_MODEL =
-  process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm'
+};
 
-const PRIMARY_PROVIDER =
-  (process.env.NOVA_PRIMARY_PROVIDER || 'gemini').toLowerCase();
+function sendJson(res, status, data) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store'
+  });
+  res.end(JSON.stringify(data));
+}
 
-const TIMEOUT = 45000;
+function setCommonHeaders(req, res) {
+  const allowedOrigin = process.env.NOVA_ALLOWED_ORIGIN || '*';
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+}
 
-const SYSTEM_PROMPT = `
-You are NOVA, a helpful personal AI assistant.
-
-Your purpose:
-- Help with everyday tasks.
-- Understand Hindi, English and Hinglish.
-- Reply in the user's language.
-- Help with coding, technology and business.
-- Explain difficult things simply.
-- Give accurate and practical answers.
-- Never claim an action was completed if it was not.
-- Never claim to be ChatGPT or GPT-4.
-- Never guess your model identity.
-- Never promise guaranteed income.
-- Ask permission before consequential external actions.
-
-You are NOVA. Be helpful, honest and friendly.
-`;
-
-// ========================================
-// FRONTEND DIRECTORY
-// ========================================
-
-const publicDir = path.join(__dirname, 'public');
-
-const frontendDir = fs.existsSync(
-  path.join(publicDir, 'index.html')
-) ? publicDir : __dirname;
-
-app.disable('x-powered-by');
-
-// ========================================
-// CORS
-// ========================================
-
-app.use((req, res, next) => {
-  const origin =
-    process.env.NOVA_ALLOWED_ORIGIN || '*';
-
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader(
-    'Access-Control-Allow-Methods',
-    'GET, POST, OPTIONS'
-  );
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization'
-  );
-
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
+async function readJson(req) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > MAX_BODY_BYTES) throw new Error('Request body is too large.');
+    chunks.push(chunk);
   }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+  } catch {
+    throw new Error('Invalid JSON request body.');
+  }
+}
 
-  next();
-});
-
-app.use(express.json({ limit: '1mb' }));
-app.use(express.static(frontendDir));
-
-// ========================================
-// MESSAGE HISTORY
-// ========================================
-
-function makeMessages(history, message) {
+function makeMessages(history, currentMessage) {
   const messages = [];
-
-  const items = Array.isArray(history)
-    ? history.slice(-12)
-    : [];
-
+  const items = Array.isArray(history) ? history.slice(-MAX_HISTORY_ITEMS) : [];
   for (const item of items) {
     if (!item || typeof item !== 'object') continue;
-
-    const role =
-      item.role === 'assistant' ||
-      item.role === 'user'
-        ? item.role
-        : null;
-
+    const role = item.role === 'assistant' ? 'assistant' : item.role === 'user' ? 'user' : null;
     if (!role) continue;
-
-    const content = String(item.content || '')
-      .trim()
-      .slice(0, 4000);
-
+    const content = String(item.content || '').trim().slice(0, MAX_HISTORY_ITEM_CHARS);
     if (!content) continue;
-
     const previous = messages[messages.length - 1];
-
-    if (previous && previous.role === role) {
-      previous.content += '\n' + content;
-    } else {
-      messages.push({ role, content });
-    }
+    if (previous && previous.role === role) previous.content += '\n' + content;
+    else messages.push({ role, content });
   }
-
-  while (
-    messages.length &&
-    messages[0].role === 'assistant'
-  ) {
-    messages.shift();
-  }
-
-  const last = messages[messages.length - 1];
-
-  if (last && last.role === 'user') {
-    last.content += '\n' + message;
-  } else {
-    messages.push({
-      role: 'user',
-      content: message
-    });
-  }
-
+  while (messages.length && messages[0].role === 'assistant') messages.shift();
+  const previous = messages[messages.length - 1];
+  if (previous && previous.role === 'user') previous.content += '\n' + currentMessage;
+  else messages.push({ role: 'user', content: currentMessage });
   return messages;
 }
 
-// ========================================
-// RESPONSE READER
-// ========================================
-
-async function readResponse(response) {
-  const body = await response.text();
-
-  try {
-    return body ? JSON.parse(body) : {};
-  } catch {
-    return {};
+async function fetchJson(url, options, providerName) {
+  const response = await fetch(url, {
+    ...options,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+  });
+  const raw = await response.text();
+  let data;
+  try { data = raw ? JSON.parse(raw) : {}; }
+  catch { throw new Error(`${providerName} returned an unreadable response (HTTP ${response.status}).`); }
+  if (!response.ok) {
+    const detail = data?.error?.message || data?.message || `HTTP ${response.status}`;
+    throw new Error(`${providerName}: ${String(detail).slice(0, 350)}`);
   }
+  return data;
 }
-
-function createProviderError(name, status, data) {
-  const message =
-    data?.error?.message ||
-    data?.message ||
-    'Unknown provider error';
-
-  return new Error(
-    `${name} HTTP ${status}: ${String(message).slice(0, 500)}`
-  );
-}
-
-// ========================================
-// GEMINI AI
-// ========================================
 
 async function askGemini(messages) {
-  if (!GEMINI_API_KEY) {
-    throw new Error('Gemini API key missing.');
-  }
-
   const contents = messages.map(item => ({
-    role: item.role === 'assistant'
-      ? 'model'
-      : 'user',
-
+    role: item.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: item.content }]
   }));
-
-  const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
-
-  const response = await fetch(url, {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
+  const data = await fetchJson(url, {
     method: 'POST',
-
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': GEMINI_API_KEY
-    },
-
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
     body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: SYSTEM_PROMPT }]
-      },
-
+      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
       contents,
-
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 2048
-      }
-    }),
-
-    signal: AbortSignal.timeout(TIMEOUT)
-  });
-
-  const data = await readResponse(response);
-
-  if (!response.ok) {
-    throw createProviderError(
-      'Gemini',
-      response.status,
-      data
-    );
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+    })
+  }, 'Google Gemini');
+  const reply = (data?.candidates?.[0]?.content?.parts || [])
+    .filter(part => typeof part.text === 'string')
+    .map(part => part.text).join('\n').trim();
+  if (!reply) {
+    const reason = data?.promptFeedback?.blockReason;
+    throw new Error(reason ? `Google Gemini blocked the request (${reason}).` : 'Google Gemini returned an empty reply.');
   }
-
-  const answer = (
-    data?.candidates?.[0]?.content?.parts || []
-  )
-    .map(part => part.text || '')
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-
-  if (!answer) {
-    throw new Error(
-      'Gemini returned no answer.'
-    );
-  }
-
-  return {
-    reply: answer,
-    provider: 'Google Gemini',
-    model: GEMINI_MODEL
-  };
+  return { reply, provider: 'Google Gemini', model: GEMINI_MODEL };
 }
-
-// ========================================
-// GROQ AI
-// ========================================
 
 async function askGroq(messages) {
-  if (!GROQ_API_KEY) {
-    throw new Error('Groq API key missing.');
-  }
-
-  const response = await fetch(
-    'https://api.groq.com/openai/v1/chat/completions',
-    {
-      method: 'POST',
-
-      headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-
-        messages: [
-          {
-            role: 'system',
-            content: SYSTEM_PROMPT
-          },
-          ...messages
-        ],
-
-        max_completion_tokens: 2048
-      }),
-
-      signal: AbortSignal.timeout(TIMEOUT)
-    }
-  );
-
-  const data = await readResponse(response);
-
-  if (!response.ok) {
-    throw createProviderError(
-      'Groq',
-      response.status,
-      data
-    );
-  }
-
-  const answer =
-    data?.choices?.[0]?.message?.content;
-
-  if (
-    typeof answer !== 'string' ||
-    !answer.trim()
-  ) {
-    throw new Error('Groq returned no answer.');
-  }
-
-  return {
-    reply: answer.trim(),
-    provider: 'Groq',
-    model: GROQ_MODEL
-  };
-}
-
-// ========================================
-// PROVIDER SELECTION
-// ========================================
-
-function getProviders() {
-  const providers = {
-    gemini: {
-      name: 'Google Gemini',
-      model: GEMINI_MODEL,
-      enabled: Boolean(GEMINI_API_KEY),
-      call: askGemini
-    },
-
-    groq: {
-      name: 'Groq',
+  const data = await fetchJson('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
       model: GROQ_MODEL,
-      enabled: Boolean(GROQ_API_KEY),
-      call: askGroq
-    }
-  };
-
-  const order = PRIMARY_PROVIDER === 'groq'
-    ? ['groq', 'gemini']
-    : ['gemini', 'groq'];
-
-  return order
-    .map(key => providers[key])
-    .filter(provider => provider.enabled);
+      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+      temperature: 0.7,
+      max_completion_tokens: 2048
+    })
+  }, 'Groq');
+  const reply = data?.choices?.[0]?.message?.content;
+  if (typeof reply !== 'string' || !reply.trim()) throw new Error('Groq returned an empty reply.');
+  return { reply: reply.trim(), provider: 'Groq', model: GROQ_MODEL };
 }
 
-// ========================================
-// HEALTH CHECK
-// ========================================
+function getProviderOrder() {
+  const all = {
+    gemini: { name: 'Google Gemini', enabled: Boolean(GEMINI_API_KEY), call: askGemini },
+    groq: { name: 'Groq', enabled: Boolean(GROQ_API_KEY), call: askGroq }
+  };
+  const order = PRIMARY_PROVIDER === 'groq' ? ['groq', 'gemini'] : ['gemini', 'groq'];
+  return order.map(key => all[key]).filter(provider => provider.enabled);
+}
 
-app.get('/api/health', (_req, res) => {
-  const providers = getProviders();
+function providerStatus() {
+  return {
+    gemini: { configured: Boolean(GEMINI_API_KEY), model: GEMINI_API_KEY ? GEMINI_MODEL : null },
+    groq: { configured: Boolean(GROQ_API_KEY), model: GROQ_API_KEY ? GROQ_MODEL : null },
+    primary: PRIMARY_PROVIDER
+  };
+}
 
-  res.json({
-    ok: true,
-    backend: 'online',
-    aiConfigured: providers.length > 0,
-
-    primaryProvider: PRIMARY_PROVIDER,
-
-    availableProviders: providers.map(p => p.name),
-
-    models: {
-      gemini: GEMINI_API_KEY
-        ? GEMINI_MODEL
-        : null,
-
-      groq: GROQ_API_KEY
-        ? GROQ_MODEL
-        : null
-    },
-
-    version: 'NOVA V11'
-  });
-});
-
-// ========================================
-// PROVIDER STATUS
-// ========================================
-
-app.get('/api/providers', (_req, res) => {
-  res.json({
-    ok: true,
-
-    primary: PRIMARY_PROVIDER,
-
-    gemini: {
-      configured: Boolean(GEMINI_API_KEY),
-      model: GEMINI_API_KEY
-        ? GEMINI_MODEL
-        : null
-    },
-
-    groq: {
-      configured: Boolean(GROQ_API_KEY),
-      model: GROQ_API_KEY
-        ? GROQ_MODEL
-        : null
-    },
-
-    version: 'NOVA V11'
-  });
-});
-
-// ========================================
-// NOVA CHAT
-// ========================================
-
-app.post('/api/chat', async (req, res) => {
+async function serveStatic(req, res, pathname) {
+  let requested;
+  try { requested = decodeURIComponent(pathname); }
+  catch { return sendJson(res, 400, { ok: false, error: 'Invalid URL path.' }); }
+  if (requested === '/') requested = '/index.html';
+  const filePath = path.resolve(PUBLIC_DIR, '.' + requested);
+  if (!filePath.startsWith(PUBLIC_DIR + path.sep)) return sendJson(res, 403, { ok: false, error: 'Forbidden.' });
   try {
-    const message = String(
-      req.body?.message || ''
-    ).trim();
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) return sendJson(res, 404, { ok: false, error: 'Not found.' });
+    const body = await fs.readFile(filePath);
+    res.writeHead(200, {
+      'Content-Type': MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
+      'Cache-Control': path.basename(filePath) === 'index.html' ? 'no-cache' : 'public, max-age=300'
+    });
+    res.end(req.method === 'HEAD' ? undefined : body);
+  } catch {
+    sendJson(res, 404, { ok: false, error: 'File not found.' });
+  }
+}
 
-    if (!message) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Message is required.'
-      });
+const server = http.createServer(async (req, res) => {
+  setCommonHeaders(req, res);
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    return res.end();
+  }
+
+  let url;
+  try { url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`); }
+  catch { return sendJson(res, 400, { ok: false, error: 'Invalid request URL.' }); }
+
+  if (req.method === 'GET' && url.pathname === '/api/health') {
+    const status = providerStatus();
+    const availableProviders = [];
+    if (status.gemini.configured) availableProviders.push('Google Gemini');
+    if (status.groq.configured) availableProviders.push('Groq');
+    return sendJson(res, 200, {
+      ok: true,
+      backend: 'online',
+      aiConfigured: availableProviders.length > 0,
+      providers: { gemini: status.gemini.configured, groq: status.groq.configured },
+      availableProviders,
+      primaryProvider: PRIMARY_PROVIDER,
+      models: { gemini: status.gemini.model, groq: status.groq.model },
+      version: 'NOVA V11'
+    });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/providers') {
+    return sendJson(res, 200, { ok: true, version: 'NOVA V11', ...providerStatus() });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/chat') {
+    let body;
+    try { body = await readJson(req); }
+    catch (error) { return sendJson(res, 400, { ok: false, error: error.message }); }
+    const message = String(body?.message || '').trim();
+    if (!message) return sendJson(res, 400, { ok: false, error: 'Please enter a message.' });
+    if (message.length > MAX_MESSAGE_CHARS) {
+      return sendJson(res, 413, { ok: false, error: `Message is too long. Maximum is ${MAX_MESSAGE_CHARS} characters.` });
     }
-
-    if (message.length > 10000) {
-      return res.status(413).json({
-        ok: false,
-        error: 'Message is too long.'
-      });
-    }
-
-    const providers = getProviders();
-
+    const providers = getProviderOrder();
     if (!providers.length) {
-      return res.status(503).json({
-        ok: false,
-        error: 'No AI provider configured.'
-      });
+      return sendJson(res, 503, { ok: false, error: 'No AI provider is configured. Add GEMINI_API_KEY and/or GROQ_API_KEY in Render Environment.' });
     }
-
-    const history = Array.isArray(req.body?.history)
-      ? req.body.history
-      : [];
-
-    const messages = makeMessages(
-      history,
-      message
-    );
-
+    const messages = makeMessages(body?.history, message);
     const errors = [];
-
     for (const provider of providers) {
       try {
-        console.log(
-          `NOVA trying provider: ${provider.name}`
-        );
-
+        console.log(`[NOVA] Trying ${provider.name}`);
         const result = await provider.call(messages);
-
-        console.log(
-          `NOVA success: ${provider.name}`
-        );
-
-        return res.json({
-          ok: true,
-          ...result,
-          fallbackUsed: errors.length > 0,
-          version: 'NOVA V11'
-        });
-
+        console.log(`[NOVA] Success: ${provider.name} (${result.model})`);
+        return sendJson(res, 200, { ok: true, ...result, mode: 'ai', fallbackUsed: errors.length > 0, version: 'NOVA V11' });
       } catch (error) {
-        console.error(
-          `${provider.name} failed:`,
-          error.message
-        );
-
-        errors.push({
-          provider: provider.name,
-          error: error.message
-        });
+        const safeMessage = String(error?.message || 'Unknown provider error').slice(0, 450);
+        console.error(`[NOVA] ${provider.name} failed: ${safeMessage}`);
+        errors.push({ provider: provider.name, error: safeMessage });
       }
     }
-
-    return res.status(502).json({
+    return sendJson(res, 502, {
       ok: false,
-      error: 'All AI providers failed.',
-      details: errors,
-      suggestion:
-        'Check API keys, model access and provider quota.'
-    });
-
-  } catch (error) {
-    console.error(
-      'NOVA chat error:',
-      error.message
-    );
-
-    return res.status(500).json({
-      ok: false,
-      error: 'Internal NOVA server error.'
+      error: 'All configured AI providers failed. Check the provider key, model access, quota and Render logs.',
+      providerErrors: errors,
+      version: 'NOVA V11'
     });
   }
+
+  if (req.method === 'GET' || req.method === 'HEAD') return serveStatic(req, res, url.pathname);
+  return sendJson(res, 404, { ok: false, error: 'Route not found.' });
 });
 
-// ========================================
-// HOME PAGE
-// ========================================
-
-app.get('/', (_req, res) => {
-  const indexFile = path.join(
-    frontendDir,
-    'index.html'
-  );
-
-  if (!fs.existsSync(indexFile)) {
-    return res.status(404).send(
-      'NOVA frontend not found.'
-    );
-  }
-
-  return res.sendFile(indexFile);
-});
-
-// ========================================
-// ERROR HANDLER
-// ========================================
-
-app.use((err, _req, res, _next) => {
-  console.error(
-    'Server error:',
-    err.message
-  );
-
-  res.status(500).json({
-    ok: false,
-    error: 'NOVA server error.'
-  });
-});
-
-// ========================================
-// START SERVER
-// ========================================
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('================================');
-  console.log('       NOVA V11 ONLINE');
-  console.log('================================');
-
-  console.log(`Port: ${PORT}`);
-  console.log(`Frontend: ${frontendDir}`);
-
-  console.log(
-    `Gemini configured: ${Boolean(GEMINI_API_KEY)}`
-  );
-
-  console.log(
-    `Groq configured: ${Boolean(GROQ_API_KEY)}`
-  );
-
-  console.log(
-    `Primary provider: ${PRIMARY_PROVIDER}`
-  );
-
-  console.log('Automatic fallback: ENABLED');
-  console.log('================================');
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`NOVA V11 listening on port ${PORT}`);
+  console.log('Frontend directory:', PUBLIC_DIR);
+  console.log('Gemini key configured:', Boolean(GEMINI_API_KEY));
+  console.log('Groq key configured:', Boolean(GROQ_API_KEY));
+  console.log('Primary provider:', PRIMARY_PROVIDER);
+  console.log('Automatic provider fallback: enabled');
 });
