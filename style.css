@@ -132,3 +132,6 @@ h1,h2,h3{ text-shadow:0 0 18px rgba(93,225,245,.13) }
 .nova-3d-shell .halo,.nova-3d-shell .orbit{pointer-events:none;z-index:1}
 .nova-3d-shell .avatar-caption{z-index:4;bottom:12px}
 .drag-hint{position:absolute;z-index:4;bottom:38px;font-size:9px;letter-spacing:2px;color:#8eeeff;opacity:.7}
+
+.report-output{white-space:pre-wrap;overflow-wrap:anywhere;max-height:560px;overflow:auto;padding:16px;border:1px solid var(--line,rgba(120,150,190,.22));border-radius:14px;background:rgba(3,8,20,.55);font:inherit;line-height:1.55;color:var(--text,#e8f2ff)}
+.stack-form{display:grid;gap:12px}

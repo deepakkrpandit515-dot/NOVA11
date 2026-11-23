@@ -1,32 +1,46 @@
-# NOVA V11 — Final consolidated project
+# NOVA V13 — Global Intelligence + Cloud Sync
 
-This package consolidates the NOVA11 source project and the later V11 Gemini/Groq backend into one consistent deployment. The backend uses Node.js built-ins, so no external npm package is required. The stale V9 `public/` interface has been replaced with the full dashboard, its matching JavaScript/CSS/3D assets, and V11 branding.
+Mobile-first NOVA personal AI assistant project, based on the existing V12 cloud-sync build with a Global Intelligence research workspace.
 
-## Included
-- `server.js` — Gemini primary + Groq automatic fallback, health/provider status, and chat API
-- `public/` — one authoritative frontend (index, app, styles, 3D scene, PWA manifest/service worker/icon)
-- `package.json`, `.env.example`
+## Included in this package
+- Gemini primary + Groq automatic fallback for AI chat and reports
+- Browser voice input/output where supported; START / RUKO controls
+- PostgreSQL cloud accounts and per-account JSON sync for supported app data
+- Tasks, money records, business notes, research notes, memory notes, social drafts and chat history
+- PWA install support, 3D hologram, local photo/video tools and local IndexedDB file vault
+- Global Intelligence workspace for market research, international trade, competitor intelligence, customer research, business ideas and opportunity analysis
+- Optional Tavily search integration; source links are shown when live search is configured
+- Backend health and provider status endpoints
 
-## Deploy to the existing Render Web Service
-1. Extract this ZIP. Upload the **contents** of the `NOVA_V11_FINAL` folder to the root of your existing `NOVA11` GitHub repository, replacing the old files. Keep the `public` folder intact.
-2. Render service settings: Runtime `Node`; Build command `npm install`; Start command `npm start`.
-3. In Render → Environment, keep only one entry for each variable below (no duplicate names):
-   - `GEMINI_API_KEY` — optional, Google AI Studio key
-   - `GROQ_API_KEY` — optional backup key
-   - `GEMINI_MODEL` — optional; default `gemini-3.5-flash-lite`
-   - `GROQ_MODEL` — optional; default `openai/gpt-oss-20b`
-   - `NOVA_PRIMARY_PROVIDER` — optional `gemini` or `groq`; default `gemini`
-4. Save and deploy. Do not add real keys to GitHub, frontend files, or chat.
-5. Verify `https://YOUR-RENDER-SERVICE.onrender.com/api/health` and `/api/providers`.
-6. Open the service root URL and use Settings → Check Backend. Send a chat message; the interface will show the actual provider and model used for that successful response.
+## Run locally
+1. Install Node.js 20+.
+2. Run `npm install`.
+3. Copy `.env.example` to `.env` and set provider keys if available.
+4. Run `npm start` and open `http://localhost:10000`.
 
-## Important status meanings
-- `aiConfigured: true` means at least one key is present in the server environment. It does **not** prove that the key has quota or that the model is currently available.
-- A successful `/api/chat` response includes `provider` and `model`; this is the confirmation of which provider actually answered.
-- If the primary provider fails, the server tries the other configured provider. If both fail, NOVA shows an error rather than pretending a local reply came from an AI model.
+## Deploy on Render
+1. Upload the contents of this ZIP to the root of the GitHub repository; keep the `public/` folder.
+2. Use a Render **Web Service**, Node runtime, Build Command `npm install`, Start Command `npm start`.
+3. Add environment variables in Render (never in GitHub):
+   - `GEMINI_API_KEY` (optional AI provider)
+   - `GROQ_API_KEY` (optional backup AI provider)
+   - `TAVILY_API_KEY` (optional live web search for Global Intelligence)
+   - `DATABASE_URL` (optional PostgreSQL internal URL for cloud sync)
+   - `NOVA_AUTH_SECRET` (required with DATABASE_URL; unique random secret, 32+ characters)
+   - `GEMINI_MODEL` (optional; default `gemini-3.5-flash-lite`)
+   - `GROQ_MODEL` (optional; default `openai/gpt-oss-20b`)
+   - `NOVA_PRIMARY_PROVIDER` (`gemini` or `groq`)
+4. Deploy and check `/api/health`. Cloud sync status is available at `/api/cloud/status`.
+5. Open Settings → NOVA Cloud Sync to register/login.
 
-## Current feature boundaries
-The dashboard includes chat, browser voice controls, tasks, local money records, research shortcuts, social drafts, local files/memory and photo/video preview tools. These are not the same as live market feeds, automatic web research, bank/UPI transfers, cloud file storage, automatic social publishing, or phone-off background agents; those integrations are not included. Money and payout areas are record-keeping demos only. Income is not guaranteed. External actions remain owner-controlled and require separate trusted integrations and explicit approval.
+## Honest feature boundaries
+- If `TAVILY_API_KEY` is absent, Global Intelligence generates AI-assisted planning reports only; it does not claim live market verification. Even with search, verify source links, dates, customs rules, taxes, prices and demand independently.
+- AI chat/reports need a working provider key and available provider quota. Free-tier limits can change; no provider is guaranteed to be free or always available.
+- Cloud sync requires a reachable PostgreSQL database and `NOVA_AUTH_SECRET`. Without them, supported records remain on this device.
+- Files in the IndexedDB vault remain local; file-content cloud upload is not enabled.
+- Voice depends on browser/device support and microphone permission. It is not an always-on phone-off listener.
+- Money screens are manual records only. No bank balance, UPI transfer, payout, trade, purchase, message or social post is executed.
+- The 3D hologram requires internet for its Three.js CDN dependency.
 
-## Local data and compatibility
-The frontend retains existing `nova9_*` browser storage keys so previously saved local tasks, notes, money entries and drafts are not intentionally renamed. Backup restore accepts the previous NOVA V7 backup format as well as V11. The new service-worker cache is versioned to replace stale cached UI files.
+## Security
+Never commit API keys, database URLs, passwords, OTPs or `NOVA_AUTH_SECRET`. Keep secrets only in Render Environment settings. Use a unique strong NOVA cloud password and sign out on shared devices.

@@ -1,12 +1,12 @@
 {
-  "name": "NOVA V11 Personal AI",
-  "short_name": "NOVA V11",
+  "name": "NOVA V12 Personal AI",
+  "short_name": "NOVA V12",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#070b18",
   "theme_color": "#070b18",
-  "description": "NOVA V11 personal AI assistant",
+  "description": "NOVA V12 personal AI assistant",
   "icons": [
     {
       "src": "/nova-icon.svg",

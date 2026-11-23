@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#070b18">
-  <meta name="description" content="NOVA V11 Personal AI Assistant">
+  <meta name="description" content="NOVA V12 Personal AI Assistant">
   <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/style.css">
-  <title>NOVA V11 • Personal AI</title>
+  <title>NOVA V12 • Personal AI</title>
 </head>
 <body>
 <div class="app">
   <header class="topbar">
-    <div class="brand"><div class="logo">N</div><div><b>NOVA V11</b><small>PERSONAL AI • GLOBAL INTELLIGENCE</small></div></div>
+    <div class="brand"><div class="logo">N</div><div><b>NOVA V12</b><small>PERSONAL AI • GLOBAL INTELLIGENCE</small></div></div>
     <div class="status"><i id="statusDot"></i><span id="statusText">Checking</span></div>
   </header>
 
@@ -20,7 +20,7 @@
     <section class="hero panel" id="home">
       <div class="hero-text">
         <div class="eyebrow">HUMAN-CONTROLLED AI SYSTEM</div>
-        <h1>Welcome to<br><span>NOVA V11</span></h1>
+        <h1>Welcome to<br><span>NOVA V12</span></h1>
         <p>Namaste! Main aapki AI assistant hoon. Text ya voice se baat shuru karein.</p>
         <div class="actions">
           <button class="btn primary" id="voiceStart">🎙 START VOICE</button>
@@ -43,6 +43,7 @@
       <button class="nav-item active" data-page="chat">✧ AI Chat</button>
       <button class="nav-item" data-page="market">◈ Market</button>
       <button class="nav-item" data-page="business">▣ Business</button>
+      <button class="nav-item" data-page="globalintel">🌐 Global Intel</button>
       <button class="nav-item" data-page="social">◎ Social Media</button>
       <button class="nav-item" data-page="studio">✦ Photo/Video Studio</button>
       <button class="nav-item" data-page="money">₹ Money</button>
@@ -70,6 +71,26 @@
       <article class="tile"><h3>Business Notes</h3><p>Idea, customer problem, solution aur estimated costs note karein.</p><textarea id="businessNotes" rows="4" placeholder="Apna business idea likhein..."></textarea><div class="actions"><button class="btn secondary" id="saveBusiness">SAVE NOTES</button><button class="btn primary" id="scanIdeas">SCAN IDEAS</button></div><pre id="ideaResult" class="hint" aria-live="polite">Tap SCAN IDEAS to generate a low-cost idea to validate.</pre><p class="hint">Idea suggestions are planning prompts, not verified market demand or guaranteed income.</p></article>
     </section>
 
+
+    <section class="page panel" id="globalintel">
+      <div class="section-head"><div><div class="eyebrow">GLOBAL INTELLIGENCE</div><h2>Market & Trade Research</h2></div><span class="pill">AI • SOURCES WHEN CONFIGURED</span></div>
+      <article class="tile">
+        <p>Global market research, import/export checks, competitor mapping, customer segments aur business opportunities ke liye report banayein.</p>
+        <form id="globalResearchForm" class="stack-form">
+          <label class="field">Research topic<input id="globalTopic" maxlength="500" placeholder="Example: Indian millet snacks demand in UAE" required></label>
+          <div class="cards">
+            <label class="field">Country / region<input id="globalCountry" maxlength="100" value="Global"></label>
+            <label class="field">Industry / sector<input id="globalSector" maxlength="120" placeholder="Example: Food exports"></label>
+          </div>
+          <button class="btn primary" id="globalResearchButton" type="submit">GENERATE INTELLIGENCE REPORT</button>
+        </form>
+        <p class="hint" id="globalResearchStatus" aria-live="polite">Live web sources require TAVILY_API_KEY. AI-only reports will be labelled clearly.</p>
+        <pre id="globalResearchOutput" class="report-output" aria-live="polite">Your research report will appear here.</pre>
+        <div id="globalResearchSources" class="rows"></div>
+        <button class="btn secondary" id="saveGlobalReport" type="button" disabled>SAVE REPORT TO CLOUD-SYNCED NOTES</button>
+      </article>
+      <article class="tile"><h3>Research coverage</h3><div class="cards"><div>🌍 Global Market Research</div><div>🚢 International Trade</div><div>🏢 Competitor Intelligence</div><div>👥 Global Customer Research</div><div>💡 Business Ideas Generator</div><div>📈 Opportunity Radar</div></div><p class="hint">Reports support planning only. Verify sources, regulations, shipping costs, taxes and customer demand independently before spending or trading.</p></article>
+    </section>
 
     <section class="page panel" id="social">
       <div class="section-head"><div><div class="eyebrow">SOCIAL MEDIA WORKSPACE</div><h2>Social Media</h2></div><span class="pill">DRAFTS • APPROVAL FIRST</span></div>
@@ -154,6 +175,16 @@
 
     <section class="page panel" id="settings">
       <div class="section-head"><div><div class="eyebrow">SYSTEM CONTROL</div><h2>Settings</h2></div><span class="pill">CONFIGURATION</span></div>
+      <article class="tile" id="cloudPanel">
+        <h3>☁️ NOVA Cloud Sync</h3>
+        <p>Account banakar Tasks, Money records, Memory, Business Notes, Research Notes aur Social Drafts ko PostgreSQL cloud par sync karein. Password ka secure hash store hota hai.</p>
+        <label class="field">Email<input id="cloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
+        <label class="field">Password<input id="cloudPassword" type="password" autocomplete="current-password" minlength="10" maxlength="128" placeholder="At least 10 characters"></label>
+        <div class="actions"><button class="btn primary" id="cloudRegister" type="button">CREATE CLOUD ACCOUNT</button><button class="btn secondary" id="cloudLogin" type="button">LOGIN</button></div>
+        <p id="cloudStatus" class="hint" aria-live="polite">Cloud setup status checking...</p>
+        <div class="actions"><button class="btn secondary" id="cloudSync" type="button" disabled>SYNC NOW</button><button class="btn stop" id="cloudLogout" type="button" disabled>LOG OUT</button></div>
+        <p class="hint">Cloud sync requires Render PostgreSQL plus DATABASE_URL and NOVA_AUTH_SECRET. Files in the Files vault remain on this device; automatic file upload is not enabled.</p>
+      </article>
       <label class="field">Backend base URL<input id="backendUrl" type="url" placeholder="https://your-service.onrender.com"></label>
       <div class="actions"><button class="btn primary" id="checkBackend">CHECK BACKEND</button><button class="btn secondary" id="saveSettings">SAVE SETTINGS</button></div>
       <p id="backendResult" class="hint">Backend URL enter karke Check Backend dabayein.</p>
@@ -168,7 +199,7 @@
       <div class="tile"><h3>Privacy & Local Data</h3><p>NOVA ke local notes aur records isi browser ke storage mein hain. Shared phone par private information save na karein.</p><button class="btn stop" id="clearLocalData" type="button">CLEAR NOVA LOCAL DATA</button></div>
     </section>
   </main>
-  <footer> N O V A V7 <span>• Owner-controlled intelligence</span></footer>
+  <footer> N O V A V12 <span>• Owner-controlled intelligence</span></footer>
 </div>
 <script src="/app.js"></script>
 <script type="module" src="/nova3d.js"></script>

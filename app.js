@@ -1,7 +1,85 @@
 const $ = id => document.getElementById(id);
-const state = { history: [], tasks: [], money: [], withdrawals: [] };
+const state = { history: (() => { try { return JSON.parse(localStorage.getItem("nova9_chat_history") || "[]"); } catch { return []; } })(), tasks: [], money: [], withdrawals: [] };
 const stored = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
-const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+const save = (key, value) => { localStorage.setItem(key, JSON.stringify(value)); scheduleCloudSync(); };
+const CLOUD_TOKEN_KEY = "nova_cloud_token";
+let cloudSyncTimer = null;
+const cloudKeys = {
+  tasks: "nova9_tasks", money: "nova9_money", withdrawals: "nova9_withdrawals",
+  business: "nova9_business", research: "nova9_research", memory: "nova9_memory",
+  socialDrafts: "nova9_social_drafts", history: "nova9_chat_history", globalReports: "nova_global_reports"
+};
+function cloudToken() { return localStorage.getItem(CLOUD_TOKEN_KEY) || ""; }
+function cloudPayload() {
+  const data = {};
+  for (const [name, key] of Object.entries(cloudKeys)) {
+    const raw = localStorage.getItem(key);
+    if (raw !== null) {
+      try { data[name] = name === "business" || name === "research" || name === "memory" ? raw : JSON.parse(raw); }
+      catch { data[name] = raw; }
+    }
+  }
+  return data;
+}
+function applyCloudPayload(data) {
+  for (const [name, key] of Object.entries(cloudKeys)) {
+    if (!Object.prototype.hasOwnProperty.call(data || {}, name)) continue;
+    const value = data[name];
+    localStorage.setItem(key, ["business", "research", "memory"].includes(name) && typeof value === "string" ? value : JSON.stringify(value));
+  }
+}
+async function cloudFetch(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  if (cloudToken()) headers.Authorization = "Bearer " + cloudToken();
+  const response = await fetch(api(path), { ...options, headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `Cloud request failed (${response.status})`);
+  return data;
+}
+function setCloudUi(message, loggedIn = Boolean(cloudToken())) {
+  const status = $("cloudStatus"); if (status) status.textContent = message;
+  const sync = $("cloudSync"); if (sync) sync.disabled = !loggedIn;
+  const logout = $("cloudLogout"); if (logout) logout.disabled = !loggedIn;
+}
+function scheduleCloudSync() {
+  if (!cloudToken()) return;
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(() => syncCloud(false), 1800);
+}
+async function syncCloud(showMessage = true) {
+  if (!cloudToken()) { if (showMessage) setCloudUi("Pehle Cloud account login karein.", false); return; }
+  try {
+    await cloudFetch("/api/cloud/data", { method: "PUT", body: JSON.stringify({ data: cloudPayload() }) });
+    setCloudUi("☁️ Cloud sync successful • " + new Date().toLocaleString("en-IN"));
+  } catch (error) {
+    setCloudUi("Cloud sync failed: " + error.message);
+    if (error.message.includes("Login required")) { localStorage.removeItem(CLOUD_TOKEN_KEY); setCloudUi("Session expired. Dobara login karein.", false); }
+  }
+}
+async function cloudAuth(mode) {
+  const email = $("cloudEmail").value.trim();
+  const password = $("cloudPassword").value;
+  if (!email || password.length < 10) { setCloudUi("Valid email aur minimum 10-character password enter karein."); return; }
+  setCloudUi(mode === "register" ? "Cloud account create ho raha hai..." : "Login ho raha hai...");
+  try {
+    const result = await cloudFetch(`/api/auth/${mode}`, { method: "POST", body: JSON.stringify({ email, password }) });
+    localStorage.setItem(CLOUD_TOKEN_KEY, result.token);
+    $("cloudPassword").value = "";
+    if (mode === "login") {
+      const remote = await cloudFetch("/api/cloud/data");
+      if (remote.data && Object.keys(remote.data).length) {
+        if (confirm("Cloud par saved data mila. OK = Cloud data is device par restore/replace; Cancel = is device ka data Cloud par upload.")) {
+          for (const key of Object.values(cloudKeys)) localStorage.removeItem(key);
+          applyCloudPayload(remote.data);
+          location.reload();
+          return;
+        }
+      }
+    }
+    await syncCloud(true);
+    setCloudUi(`Logged in as ${result.user.email} • Cloud sync ready`);
+  } catch (error) { setCloudUi("Cloud account error: " + error.message, false); }
+}
 let recognition = null;
 let activeChatController = null;
 let voiceSession = false;
@@ -29,7 +107,7 @@ async function checkBackend() {
     if (configured.gemini) labels.push(`Gemini (${models.gemini || "model set"})`);
     if (configured.groq) labels.push(`Groq (${models.groq || "model set"})`);
     setStatus(true, data.aiConfigured ? "Backend online • AI keys found" : "Backend online • AI keys missing");
-    $("backendResult").textContent = `Backend online • ${data.version || "NOVA V11"} • Configured: ${labels.join(" + ") || "none"}`;
+    $("backendResult").textContent = `Backend online • ${data.version || "NOVA V12"} • Configured: ${labels.join(" + ") || "none"}`;
     const note = data.aiConfigured
       ? `Keys configured: ${labels.join(" + ")}. Actual provider access is confirmed only after a successful chat request.`
       : "Backend online hai, lekin Render Environment mein GEMINI_API_KEY ya GROQ_API_KEY set nahi hai.";
@@ -83,7 +161,7 @@ $("chatForm").addEventListener("submit", async event => {
       speechSynthesis.speak(utterance);
     }
     state.history.push({ role: "user", content: message }, { role: "assistant", content: reply });
-    state.history = state.history.slice(-12);
+    state.history = state.history.slice(-12); save("nova9_chat_history", state.history);
     $("avatarState").textContent = "NOVA READY";
   } catch (error) {
     if (error.name === "AbortError") {
@@ -168,7 +246,7 @@ if (exportMoney) exportMoney.addEventListener("click", () => {
   const a = document.createElement("a"); a.href = url; a.download = "nova-money-records.csv"; a.click(); URL.revokeObjectURL(url);
 });
 
-$("saveBusiness").addEventListener("click", () => { localStorage.setItem("nova9_business", $("businessNotes").value); alert("Business notes saved on this device."); });
+$("saveBusiness").addEventListener("click", () => { localStorage.setItem("nova9_business", $("businessNotes").value); scheduleCloudSync(); alert("Business notes saved."); });
 const ideaButton = document.getElementById("scanIdeas");
 if (ideaButton) ideaButton.addEventListener("click", () => {
   const ideas = [
@@ -181,8 +259,8 @@ if (ideaButton) ideaButton.addEventListener("click", () => {
   const out = document.getElementById("ideaResult");
   out.textContent = `IDEA: ${chosen[0]}\nProblem/Solution: ${chosen[1]}\nLow-cost test: ${chosen[2]}\n\nValidate customer demand first. Income is not guaranteed.`;
 });
-$("saveResearch").addEventListener("click", () => { localStorage.setItem("nova9_research", $("researchNotes").value); alert("Research notes saved on this device."); });
-$("saveMemory").addEventListener("click", () => { localStorage.setItem("nova9_memory", $("memoryNotes").value); alert("Memory notes saved on this device."); });
+$("saveResearch").addEventListener("click", () => { localStorage.setItem("nova9_research", $("researchNotes").value); scheduleCloudSync(); alert("Research notes saved."); });
+$("saveMemory").addEventListener("click", () => { localStorage.setItem("nova9_memory", $("memoryNotes").value); scheduleCloudSync(); alert("Memory notes saved."); });
 $("businessNotes").value = localStorage.getItem("nova9_business") || "";
 $("researchNotes").value = localStorage.getItem("nova9_research") || "";
 $("memoryNotes").value = localStorage.getItem("nova9_memory") || "";
@@ -244,6 +322,18 @@ $("saveSettings").addEventListener("click", () => {
 });
 $("backendUrl").value = localStorage.getItem("nova9_backend") || "";
 $("checkBackend").addEventListener("click", checkBackend);
+$("cloudRegister").addEventListener("click", () => cloudAuth("register"));
+$("cloudLogin").addEventListener("click", () => cloudAuth("login"));
+$("cloudSync").addEventListener("click", () => syncCloud(true));
+$("cloudLogout").addEventListener("click", () => { localStorage.removeItem(CLOUD_TOKEN_KEY); setCloudUi("Logged out. Is device ka local data safe rahega; Cloud data delete nahi hoga.", false); });
+(async () => {
+  try {
+    const status = await cloudFetch("/api/cloud/status");
+    if (!status.configured) setCloudUi("Cloud backend ready nahi: Render mein PostgreSQL DATABASE_URL aur NOVA_AUTH_SECRET set karein.", false);
+    else if (cloudToken()) setCloudUi("Cloud account token found. Sync available.");
+    else setCloudUi("Cloud ready. Create account ya login karein.", false);
+  } catch (e) { setCloudUi("Cloud status unavailable: " + e.message, false); }
+})();
 
 function startVoice() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -272,6 +362,46 @@ function stopVoice() {
 }
 $("voiceStart").addEventListener("click", startVoice);
 $("voiceStop").addEventListener("click", stopVoice);
+
+let latestGlobalReport = null;
+const globalForm = $('globalResearchForm');
+if (globalForm) globalForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const topic = $('globalTopic').value.trim();
+  const country = $('globalCountry').value.trim() || 'Global';
+  const sector = $('globalSector').value.trim() || 'General';
+  if (!topic) return;
+  const button = $('globalResearchButton');
+  button.disabled = true; button.textContent = 'RESEARCHING...';
+  $('globalResearchStatus').textContent = 'NOVA is preparing the report. This may take a little time.';
+  $('globalResearchOutput').textContent = 'Research in progress...';
+  $('globalResearchSources').replaceChildren();
+  $('saveGlobalReport').disabled = true;
+  try {
+    const response = await fetch(api('/api/business/research'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic, country, sector }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.error || 'Research request failed.');
+    latestGlobalReport = { topic, country, sector, report: data.reply, sources: data.sources || [], mode: data.researchMode, date: new Date().toISOString() };
+    $('globalResearchOutput').textContent = data.reply || 'No report returned.';
+    $('globalResearchStatus').textContent = data.liveSearchUsed ? `Live web search + AI • ${data.provider || 'AI'} • Sources are unverified until checked.` : `AI guidance only (${data.provider || 'AI'}) • No live web sources were connected.`;
+    for (const source of latestGlobalReport.sources) {
+      const row = document.createElement('div'); row.className = 'row';
+      const link = document.createElement('a'); link.href = source.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = source.title || source.url;
+      row.append(link); $('globalResearchSources').append(row);
+    }
+    $('saveGlobalReport').disabled = false;
+  } catch (error) {
+    $('globalResearchStatus').textContent = 'Research error: ' + error.message;
+    $('globalResearchOutput').textContent = 'Report could not be generated. Check backend status and AI/search provider settings.';
+  } finally { button.disabled = false; button.textContent = 'GENERATE INTELLIGENCE REPORT'; }
+});
+if ($('saveGlobalReport')) $('saveGlobalReport').addEventListener('click', () => {
+  if (!latestGlobalReport) return;
+  const reports = stored('nova_global_reports', []);
+  reports.unshift(latestGlobalReport);
+  save('nova_global_reports', reports.slice(0, 30));
+  $('globalResearchStatus').textContent = 'Report saved. If Cloud Sync is logged in, it will sync automatically.';
+});
 
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
@@ -389,13 +519,13 @@ loadSocialDrafts();
 // Local backup/restore: exports only NOVA data stored in this browser.
 const NOVA_DATA_KEYS = [
   "nova9_tasks", "nova9_money", "nova9_withdrawals", "nova9_business",
-  "nova9_research", "nova9_memory", "nova9_social_drafts", "nova9_backend"
+  "nova9_research", "nova9_memory", "nova9_social_drafts", "nova9_chat_history", "nova9_backend"
 ];
 const exportBackupButton = $("exportBackup");
 const importBackupInput = $("importBackup");
 const backupStatus = $("backupStatus");
 if (exportBackupButton) exportBackupButton.addEventListener("click", () => {
-  const payload = { app: "NOVA V11", formatVersion: 1, exportedAt: new Date().toISOString(), data: {} };
+  const payload = { app: "NOVA V12", formatVersion: 1, exportedAt: new Date().toISOString(), data: {} };
   NOVA_DATA_KEYS.forEach(key => {
     const value = localStorage.getItem(key);
     if (value !== null) payload.data[key] = value;
@@ -403,7 +533,7 @@ if (exportBackupButton) exportBackupButton.addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = url; link.download = `nova-v11-backup-${new Date().toISOString().slice(0,10)}.json`;
+  link.href = url; link.download = `nova-v12-backup-${new Date().toISOString().slice(0,10)}.json`;
   link.click(); URL.revokeObjectURL(url);
   if (backupStatus) backupStatus.textContent = "Backup file downloaded. Ise private jagah par rakhein.";
 });
@@ -413,7 +543,7 @@ if (importBackupInput) importBackupInput.addEventListener("change", async () => 
   try {
     if (file.size > 2 * 1024 * 1024) throw new Error("Backup file 2 MB se chhoti honi chahiye.");
     const payload = JSON.parse(await file.text());
-    if (!["NOVA V7", "NOVA V11"].includes(payload.app) || payload.formatVersion !== 1 || !payload.data || typeof payload.data !== "object") {
+    if (!["NOVA V7", "NOVA V11", "NOVA V12"].includes(payload.app) || payload.formatVersion !== 1 || !payload.data || typeof payload.data !== "object") {
       throw new Error("Yeh valid NOVA backup nahi hai.");
     }
     if (!confirm("Current local NOVA data selected backup se replace hoga. Continue?")) return;

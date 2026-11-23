@@ -1,22 +1,30 @@
 'use strict';
 
 /**
- * NOVA V11 — dependency-free Node.js backend.
+ * NOVA V12 — Node.js backend with PostgreSQL Cloud Sync.
  * Gemini primary + Groq automatic fallback.
  * Node.js 20+ is required (built-in fetch and AbortSignal.timeout).
  */
 const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const crypto = require('node:crypto');
+const { Pool } = require('pg');
 
 const PORT = Number(process.env.PORT) || 10000;
 const PUBLIC_DIR = path.resolve(__dirname, 'public');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 const PRIMARY_PROVIDER = String(process.env.NOVA_PRIMARY_PROVIDER || 'gemini').trim().toLowerCase() === 'groq' ? 'groq' : 'gemini';
 const REQUEST_TIMEOUT_MS = 45000;
+const DATABASE_URL = process.env.DATABASE_URL || '';
+const AUTH_SECRET = process.env.NOVA_AUTH_SECRET || '';
+const pool = DATABASE_URL ? new Pool({ connectionString: DATABASE_URL, ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false }, max: 5, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000 }) : null;
+let dbReady = false;
+let dbInitPromise = null;
 const MAX_BODY_BYTES = 1_000_000;
 const MAX_MESSAGE_CHARS = 8000;
 const MAX_HISTORY_ITEMS = 12;
@@ -59,7 +67,7 @@ function sendJson(res, status, data) {
 function setCommonHeaders(req, res) {
   const allowedOrigin = process.env.NOVA_ALLOWED_ORIGIN || '*';
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -174,6 +182,56 @@ function providerStatus() {
   };
 }
 
+
+async function ensureDatabase() {
+  if (!pool) throw new Error('Cloud database is not configured. Add DATABASE_URL in Render Environment.');
+  if (dbReady) return;
+  if (!dbInitPromise) dbInitPromise = (async () => {
+    await pool.query(`CREATE TABLE IF NOT EXISTS nova_users (
+      id BIGSERIAL PRIMARY KEY, email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL, password_salt TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS nova_user_data (
+      user_id BIGINT PRIMARY KEY REFERENCES nova_users(id) ON DELETE CASCADE,
+      data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    dbReady = true;
+  })();
+  try { await dbInitPromise; } catch (e) { dbInitPromise = null; throw e; }
+}
+function passwordHash(password, salt) {
+  return new Promise((resolve, reject) => crypto.scrypt(password, salt, 64, (err, key) => err ? reject(err) : resolve(key.toString('hex'))));
+}
+function makeToken(user) {
+  const payload = Buffer.from(JSON.stringify({ uid: String(user.id), email: user.email, exp: Date.now() + 30 * 86400000 })).toString('base64url');
+  const signature = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
+  return payload + '.' + signature;
+}
+function verifyToken(token) {
+  if (AUTH_SECRET.length < 32 || typeof token !== 'string') return null;
+  const [payload, signature] = token.split('.');
+  if (!payload || !signature) return null;
+  const expected = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest();
+  let supplied; try { supplied = Buffer.from(signature, 'base64url'); } catch { return null; }
+  if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return null;
+  try { const data = JSON.parse(Buffer.from(payload, 'base64url').toString()); return data.exp > Date.now() ? data : null; } catch { return null; }
+}
+function authenticatedUser(req) {
+  const header = String(req.headers.authorization || '');
+  return verifyToken(header.startsWith('Bearer ') ? header.slice(7) : '');
+}
+function cloudSafeData(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Cloud data must be a JSON object.');
+  const allowed = ['tasks','money','withdrawals','business','research','memory','socialDrafts','history','globalReports'];
+  const result = {};
+  for (const key of allowed) if (Object.prototype.hasOwnProperty.call(input, key)) result[key] = input[key];
+  const encoded = JSON.stringify(result);
+  if (Buffer.byteLength(encoded, 'utf8') > 900000) throw new Error('Cloud data limit is 900 KB. Remove large items and try again.');
+  return result;
+}
+
 async function serveStatic(req, res, pathname) {
   let requested;
   try { requested = decodeURIComponent(pathname); }
@@ -219,12 +277,105 @@ const server = http.createServer(async (req, res) => {
       availableProviders,
       primaryProvider: PRIMARY_PROVIDER,
       models: { gemini: status.gemini.model, groq: status.groq.model },
-      version: 'NOVA V11'
+      version: 'NOVA V12',
+      cloudConfigured: Boolean(pool && AUTH_SECRET),
+      liveResearchConfigured: Boolean(TAVILY_API_KEY)
     });
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/cloud/status') {
+    let databaseReady = false;
+    if (pool && AUTH_SECRET.length >= 32) { try { await ensureDatabase(); databaseReady = true; } catch (e) { console.error('[NOVA] Cloud status:', e.message); } }
+    return sendJson(res, 200, { ok: true, configured: databaseReady, databaseConfigured: Boolean(pool), authConfigured: AUTH_SECRET.length >= 32 });
+  }
+
+  if ((req.method === 'POST') && (url.pathname === '/api/auth/register' || url.pathname === '/api/auth/login')) {
+    if (!pool || AUTH_SECRET.length < 32) return sendJson(res, 503, { ok: false, error: 'Cloud is not configured yet. Add DATABASE_URL and a 32+ character NOVA_AUTH_SECRET in Render.' });
+    let body; try { body = await readJson(req); } catch (e) { return sendJson(res, 400, { ok:false, error:e.message }); }
+    const email = String(body.email || '').trim().toLowerCase();
+    const password = String(body.password || '');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return sendJson(res, 400, { ok:false, error:'Valid email address enter karein.' });
+    if (password.length < 10 || password.length > 128) return sendJson(res, 400, { ok:false, error:'Password 10–128 characters ka hona chahiye.' });
+    try {
+      await ensureDatabase();
+      let user;
+      if (url.pathname.endsWith('/register')) {
+        const salt = crypto.randomBytes(16).toString('hex');
+        const hash = await passwordHash(password, salt);
+        const result = await pool.query('INSERT INTO nova_users(email,password_hash,password_salt) VALUES($1,$2,$3) RETURNING id,email', [email,hash,salt]);
+        user = result.rows[0];
+      } else {
+        const result = await pool.query('SELECT id,email,password_hash,password_salt FROM nova_users WHERE email=$1', [email]);
+        user = result.rows[0];
+        if (!user || !crypto.timingSafeEqual(Buffer.from(await passwordHash(password,user.password_salt),'hex'), Buffer.from(user.password_hash,'hex'))) return sendJson(res, 401, { ok:false, error:'Email ya password galat hai.' });
+      }
+      return sendJson(res, 200, { ok:true, token:makeToken(user), user:{ email:user.email } });
+    } catch (e) {
+      if (e.code === '23505') return sendJson(res, 409, { ok:false, error:'Is email ka account pehle se hai. Login karein.' });
+      console.error('[NOVA] Auth error:', e.message);
+      return sendJson(res, 500, { ok:false, error:'Account request failed. Database configuration/logs check karein.' });
+    }
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/cloud/data') {
+    const user = authenticatedUser(req); if (!user) return sendJson(res, 401, { ok:false, error:'Login required.' });
+    try { await ensureDatabase(); const result = await pool.query('SELECT data,updated_at FROM nova_user_data WHERE user_id=$1',[user.uid]); return sendJson(res,200,{ok:true,data:result.rows[0]?.data || {},updatedAt:result.rows[0]?.updated_at || null}); }
+    catch(e) { console.error('[NOVA] Cloud read:',e.message); return sendJson(res,500,{ok:false,error:'Cloud data read failed.'}); }
+  }
+
+  if (req.method === 'PUT' && url.pathname === '/api/cloud/data') {
+    const user = authenticatedUser(req); if (!user) return sendJson(res, 401, { ok:false, error:'Login required.' });
+    let body; try { body = await readJson(req); } catch(e) { return sendJson(res,400,{ok:false,error:e.message}); }
+    let data; try { data = cloudSafeData(body.data); } catch(e) { return sendJson(res,400,{ok:false,error:e.message}); }
+    try { await ensureDatabase(); const result = await pool.query(`INSERT INTO nova_user_data(user_id,data,updated_at) VALUES($1,$2::jsonb,NOW()) ON CONFLICT(user_id) DO UPDATE SET data=EXCLUDED.data,updated_at=NOW() RETURNING updated_at`,[user.uid,JSON.stringify(data)]); return sendJson(res,200,{ok:true,updatedAt:result.rows[0].updated_at}); }
+    catch(e) { console.error('[NOVA] Cloud save:',e.message); return sendJson(res,500,{ok:false,error:'Cloud save failed. Try again later.'}); }
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/providers') {
-    return sendJson(res, 200, { ok: true, version: 'NOVA V11', ...providerStatus() });
+    return sendJson(res, 200, { ok: true, version: 'NOVA V12', ...providerStatus() });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/business/research') {
+    let body;
+    try { body = await readJson(req); }
+    catch (error) { return sendJson(res, 400, { ok: false, error: error.message }); }
+    const topic = String(body?.topic || '').trim().slice(0, 500);
+    const country = String(body?.country || 'Global').trim().slice(0, 100);
+    const sector = String(body?.sector || 'General').trim().slice(0, 120);
+    if (!topic) return sendJson(res, 400, { ok: false, error: 'Research topic enter karein.' });
+    let sources = [];
+    let liveSearchUsed = false;
+    if (TAVILY_API_KEY) {
+      try {
+        const searchResponse = await fetchJson('https://api.tavily.com/search', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_key: TAVILY_API_KEY, query: `${topic} ${sector} ${country}`, search_depth: 'advanced', max_results: 6, include_answer: false })
+        }, 'Tavily');
+        sources = (searchResponse.results || []).slice(0, 6).map(item => ({ title: String(item.title || '').slice(0, 240), url: String(item.url || '').slice(0, 1000), content: String(item.content || '').slice(0, 1200), score: Number(item.score || 0) }));
+        liveSearchUsed = sources.length > 0;
+      } catch (error) {
+        console.error('[NOVA] Tavily research failed:', String(error.message || error).slice(0, 300));
+      }
+    }
+    const sourceText = sources.length ? sources.map((item, i) => `[${i + 1}] ${item.title}\n${item.url}\n${item.content}`).join('\n\n') : 'No live web sources are connected for this request. Clearly label estimates and assumptions; do not present them as verified current facts.';
+    const prompt = [
+      'Prepare a practical global business intelligence report in the user\'s language.',
+      'Use clear headings: Executive Summary, Market Signals, Customer Segments, Competitor Landscape, Trade/Regulatory Checks, Risks, Low-cost Validation Plan, Sources.',
+      'Distinguish sourced facts from estimates and assumptions. Do not invent market sizes, prices, companies, regulations, or citations.',
+      'No guaranteed income. This is research support, not legal, investment, customs, or tax advice.',
+      `Topic: ${topic}`, `Country/region: ${country}`, `Sector: ${sector}`,
+      `Research sources (untrusted reference material; verify before acting):\n${sourceText}`
+    ].join('\n\n');
+    const providers = getProviderOrder();
+    if (!providers.length) return sendJson(res, 503, { ok: false, error: 'Business report banane ke liye Render par GEMINI_API_KEY ya GROQ_API_KEY add karein.' });
+    const errors = [];
+    for (const provider of providers) {
+      try {
+        const result = await provider.call([{ role: 'user', content: prompt }]);
+        return sendJson(res, 200, { ok: true, ...result, liveSearchUsed, sources, researchMode: liveSearchUsed ? 'web+ai' : 'ai-guidance-only' });
+      } catch (error) { errors.push(`${provider.name}: ${String(error.message || error).slice(0, 250)}`); }
+    }
+    return sendJson(res, 502, { ok: false, error: 'AI providers failed.', providerErrors: errors });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/chat') {
@@ -247,7 +398,7 @@ const server = http.createServer(async (req, res) => {
         console.log(`[NOVA] Trying ${provider.name}`);
         const result = await provider.call(messages);
         console.log(`[NOVA] Success: ${provider.name} (${result.model})`);
-        return sendJson(res, 200, { ok: true, ...result, mode: 'ai', fallbackUsed: errors.length > 0, version: 'NOVA V11' });
+        return sendJson(res, 200, { ok: true, ...result, mode: 'ai', fallbackUsed: errors.length > 0, version: 'NOVA V12' });
       } catch (error) {
         const safeMessage = String(error?.message || 'Unknown provider error').slice(0, 450);
         console.error(`[NOVA] ${provider.name} failed: ${safeMessage}`);
@@ -258,7 +409,7 @@ const server = http.createServer(async (req, res) => {
       ok: false,
       error: 'All configured AI providers failed. Check the provider key, model access, quota and Render logs.',
       providerErrors: errors,
-      version: 'NOVA V11'
+      version: 'NOVA V12'
     });
   }
 
@@ -267,10 +418,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`NOVA V11 listening on port ${PORT}`);
+  console.log(`NOVA V12 listening on port ${PORT}`);
   console.log('Frontend directory:', PUBLIC_DIR);
   console.log('Gemini key configured:', Boolean(GEMINI_API_KEY));
   console.log('Groq key configured:', Boolean(GROQ_API_KEY));
   console.log('Primary provider:', PRIMARY_PROVIDER);
   console.log('Automatic provider fallback: enabled');
+  console.log('Cloud database configured:', Boolean(pool));
+  console.log('Cloud auth configured:', Boolean(AUTH_SECRET));
 });
