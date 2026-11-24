@@ -1,0 +1,9 @@
+{
+  "name": "NOVA V11 Personal AI",
+  "short_name": "NOVA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07101f",
+  "theme_color": "#07101f",
+  "icons": []
+}
